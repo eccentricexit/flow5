@@ -1576,6 +1576,7 @@ void PlaneTask::scaleResultsToSpeed(double vOld, double vNew)
             for(int m=0; m<pWing->nStations(); m++)
             {
                 m_SpanDistFF[iw].m_F[m]     *= ratio*ratio;
+                if(m<int(m_SpanDistFF[iw].m_FPressure.size())) m_SpanDistFF[iw].m_FPressure[m] *= ratio*ratio;
                 m_SpanDistFF[iw].m_Vd[m]    *= ratio;
                 m_SpanDistFF[iw].m_Gamma[m] *= ratio;
             }

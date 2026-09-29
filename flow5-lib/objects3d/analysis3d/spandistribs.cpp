@@ -95,6 +95,7 @@ void SpanDistribs::resizeResults(int NStation)
     m_Gamma.resize(NStation);            std::fill(m_Gamma.begin(),      m_Gamma.end(),            0);
     m_bConverged.resize(NStation);       std::fill(m_bConverged.begin(), m_bConverged.end(),       false);
     m_F.resize(NStation);                std::fill(m_F.begin(),          m_F.end(),                Vector3d());
+    m_FPressure.resize(NStation);        std::fill(m_FPressure.begin(),  m_FPressure.end(),        Vector3d());
     m_Vd.resize(NStation);               std::fill(m_Vd.begin(),         m_Vd.end(),               Vector3d());
 }
 
@@ -127,6 +128,7 @@ void SpanDistribs::initializeToZero()
     std::fill(m_Gamma.begin(),      m_Gamma.end(),            0);
     std::fill(m_bConverged.begin(), m_bConverged.end(),       false);
     std::fill(m_F.begin(),          m_F.end(),                Vector3d());
+    std::fill(m_FPressure.begin(),  m_FPressure.end(),        Vector3d());
     std::fill(m_Vd.begin(),         m_Vd.end(),               Vector3d());
 }
 
