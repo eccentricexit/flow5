@@ -22,6 +22,7 @@
 
 *****************************************************************************/
 
+#include <algorithm>
 #include <format>
 #include <chrono>
 #include <thread>
@@ -1768,10 +1769,13 @@ void PlaneXfl::setRangePositions3(PlanePolar const *pWPolar, double t, std::stri
     }
     std::vector<Node> &nodes = triMesh().nodes();
 
+    std::vector<std::vector<double>> flapangles(nWings());
+
     // set the angles
     for(int iw=0; iw<nWings(); iw++)
     {
         WingXfl const *pWing = wingAt(iw);
+        flapangles[iw].assign(pWing->nSurfaces(), 0.0);
         int iCtrl=0;
         deltaangle = pWPolar->angleRange(iw,0).ctrlVal(t);
 
@@ -1812,14 +1816,18 @@ void PlaneXfl::setRangePositions3(PlanePolar const *pWPolar, double t, std::stri
                     outstring += strange;
 
                     rotateFlapNodes(triPanels(), nodes, surf, surf.hingePoint(), surf.hingeVector(), deltaangle);
+                    flapangles[iw][jSurf] = deltaangle;
                 }
                 iCtrl++;
             }
         }
     }
 
+    sealFlapEnds(triPanels(), refTriMesh().nodes(), nodes, flapangles);
 
     TriMesh::rebuildPanelsFromNodes(triPanels(), nodes);
+
+    if(pWPolar->isTriLinearMethod()) triMesh().makeNodeNormals(false); // the node normals of the deflected geometry
 
     outstring  +="\n";
 
@@ -1873,6 +1881,106 @@ void PlaneXfl::rotateFlapNodes(const std::vector<Panel3> &panel3, std::vector<No
 }
 
 
+/**
+ * Seals the ends of the deflected flaps.
+ * Each surface has its own nodes aft of the hinge, so a flap rotated alone leaves an open slot at each of its ends,
+ * between its end section and the neighbouring surface's. At each junction where the two surfaces' deflections differ,
+ * the two copies of each node on the junction section, which coincide in the reference geometry, are both set to the
+ * mean deflection: the flap's end strip and the neighbour's end strip are warped, each taking half of the change, so
+ * the slot is closed and the deflected span is unchanged to first order.
+ * The rotations are about the deflected flap's hinge, or about each flap's own hinge when both are deflected.
+ * The panels must then be rebuilt from the nodes.
+ * @param panel3 the panels, whose node indexes are used
+ * @param refnode the nodes in the reference geometry, used to find the coincident nodes
+ * @param node the nodes to move, with the flaps already rotated by rotateFlapNodes
+ * @param flapangles the deflection in degrees of each surface of each wing, 0 for the surfaces without a flap
+ * @return the number of nodes moved
+ */
+int PlaneXfl::sealFlapEnds(std::vector<Panel3> const &panel3, std::vector<Node> const &refnode, std::vector<Node> &node,
+                           std::vector<std::vector<double>> const &flapangles) const
+{
+    int nMoved = 0;
+
+    auto angle = [&flapangles](int iw, int jSurf)
+    {
+        if(iw<0 || iw>=int(flapangles.size())) return 0.0;
+        if(jSurf<0 || jSurf>=int(flapangles.at(iw).size())) return 0.0;
+        return flapangles.at(iw).at(jSurf);
+    };
+
+    auto nodesOf = [&panel3](std::vector<int> const &panels)
+    {
+        std::vector<int> nodes;
+        for(int i3 : panels)
+        {
+            if(i3<0 || i3>=int(panel3.size())) continue;
+            for(int iv=0; iv<3; iv++) nodes.push_back(panel3.at(i3).nodeIndex(iv));
+        }
+        std::sort(nodes.begin(), nodes.end());
+        nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+        return nodes;
+    };
+
+    for(int iw=0; iw<nWings(); iw++)
+    {
+        WingXfl const *pWing = wingAt(iw);
+        for(int jSurf=0; jSurf+1<pWing->nSurfaces(); jSurf++)
+        {
+            Surface const &sa = pWing->surfaceAt(jSurf);   // left
+            Surface const &sb = pWing->surfaceAt(jSurf+1); // right
+            if(sa.isClosedRightSide() || sb.isClosedLeftSide()) continue; // a centre gap, not connected
+
+            double ta = sa.hasTEFlap() ? angle(iw, jSurf)   : 0.0;
+            double tb = sb.hasTEFlap() ? angle(iw, jSurf+1) : 0.0;
+            bool bDefA = fabs(ta)>ANGLEPRECISION;
+            bool bDefB = fabs(tb)>ANGLEPRECISION;
+            if(!bDefA && !bDefB) continue;
+            if(fabs(ta-tb)<=ANGLEPRECISION) continue; // deflected together: no slot
+
+            double tmean = (ta+tb)/2.0;
+            // the hinge each side's nodes turn about
+            Surface const &ha = bDefA ? sa : sb;
+            Surface const &hb = bDefB ? sb : sa;
+
+            // the nodes rotated with each flap, and all the nodes of each surface
+            std::vector<int> const flapA = bDefA ? nodesOf(sa.flapPanel3()) : std::vector<int>();
+            std::vector<int> const flapB = bDefB ? nodesOf(sb.flapPanel3()) : std::vector<int>();
+            std::vector<int> const allA = nodesOf(sa.panel3list());
+            std::vector<int> const allB = nodesOf(sb.panel3list());
+
+            // each node is turned once, although it may coincide with several (the top and bottom trailing nodes)
+            std::vector<bool> bDone(node.size(), false);
+            for(int ia : allA)
+            {
+                if(ia<0 || ia>=int(node.size()) || ia>=int(refnode.size())) continue;
+                bool bFlapA = std::binary_search(flapA.begin(), flapA.end(), ia);
+                for(int ib : allB)
+                {
+                    if(ib==ia || ib<0 || ib>=int(node.size()) || ib>=int(refnode.size())) continue;
+                    bool bFlapB = std::binary_search(flapB.begin(), flapB.end(), ib);
+                    if(!bFlapA && !bFlapB) continue; // neither copy moved with a flap
+                    if(!refnode.at(ia).isSame(refnode.at(ib), 0.0001)) continue;
+
+                    double da = tmean - (bFlapA ? ta : 0.0);
+                    double db = tmean - (bFlapB ? tb : 0.0);
+                    if(!bDone[ia])
+                    {
+                        if(fabs(da)>ANGLEPRECISION) {node[ia].rotate(ha.hingePoint(), ha.hingeVector(), da); nMoved++;}
+                        bDone[ia] = true;
+                    }
+                    if(!bDone[ib])
+                    {
+                        if(fabs(db)>ANGLEPRECISION) {node[ib].rotate(hb.hingePoint(), hb.hingeVector(), db); nMoved++;}
+                        bDone[ib] = true;
+                    }
+                }
+            }
+        }
+    }
+    return nMoved;
+}
+
+
 double PlaneXfl::flapPosition(AngleControl const &avlc, int iWing, int iFlap) const
 {
     for(int iw=0; iw<nWings(); iw++)
@@ -1916,10 +2024,14 @@ void PlaneXfl::setFlaps(PlanePolar const *pPlPolar, double ctrl, std::string &ou
 
     std::vector<Node> &nodes = m_TriMesh.nodes();
 
+    std::vector<std::vector<double>> flapangles(nWings());
+    bool bRotated = false;
+
     // set the angles
     for(int iw=0; iw<nWings(); iw++)
     {
         WingXfl const *pWing = wingAt(iw);
+        flapangles[iw].assign(pWing->nSurfaces(), 0.0);
 
         if(iw>=pPlPolar->nFlapCtrls())
         {
@@ -1961,6 +2073,8 @@ void PlaneXfl::setFlaps(PlanePolar const *pPlPolar, double ctrl, std::string &ou
                             m_TriMesh.panel(idx).rotate(surf.hingePoint(), surf.hingeVector(), flapangle);
                         }
                         rotateFlapNodes(m_TriMesh.panels(), nodes, surf, surf.hingePoint(), surf.hingeVector(), flapangle);
+                        flapangles[iw][jSurf] = flapangle;
+                        bRotated = true;
                     }
                     else if(pPlPolar->isQuadMethod())
                     {
@@ -1978,7 +2092,18 @@ void PlaneXfl::setFlaps(PlanePolar const *pPlPolar, double ctrl, std::string &ou
         }
     }
 
-//    if(pWPolar->isTriangleMethod())        TriMesh::rebuildPanelsFromNodes(m_TriMesh.panels(), nodes);
+    if(bRotated && pPlPolar->isTriangleMethod())
+    {
+        // close the slots at the flap ends, then make the panels follow the nodes
+        int nSealed = sealFlapEnds(m_TriMesh.panels(), m_RefTriMesh.nodes(), nodes, flapangles);
+        if(nSealed>0)
+            outstring += std::format("   Sealing the flap ends: moved {:d} nodes to the mean deflection of their junction\n", nSealed);
+
+        TriMesh::rebuildPanelsFromNodes(m_TriMesh.panels(), nodes);
+
+        // the node normals of the deflected geometry
+        if(pPlPolar->isTriLinearMethod()) m_TriMesh.makeNodeNormals(false);
+    }
 
     outstring  +="\n";
 
