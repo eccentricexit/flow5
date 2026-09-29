@@ -71,6 +71,7 @@ struct FL5LIB_EXPORT SpanDistribs
         std::vector<bool> m_bConverged;      /**< true if the local viscous interpolation or OTF calculation has converged */
         std::vector<Vector3d> m_Vd;          /**< the downwash vector at span stations in m/s. The downwash is calculated at the mid wake point, i.e. where the induced drag is evaluated. */
         std::vector<Vector3d> m_F;           /**< the force vector at span stations, in N and in body axes */
+        std::vector<Vector3d> m_FPressure;   /**< the sum of the panel forces on each strip, in N and in body axes: the near-field counterpart of m_F (panel pressures; for VLM, the panels' vortex forces). The tip patches' forces go to the nearest strip, so that the strips sum to the wing's Fsum. */
 
 
         std::vector<double> m_Chord;         /**< the chord on the strips */
