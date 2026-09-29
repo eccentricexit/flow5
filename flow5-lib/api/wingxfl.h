@@ -129,6 +129,7 @@ class FL5LIB_EXPORT WingXfl : public Part
         void panel4ComputeStrips(const std::vector<Panel4> &panel4list,
                                  const PlanePolar *pWPolar, const Vector3d &CoG, double alpha, double beta, double QInf, const double *Cp, const double *Gamma, SpanDistribs &SpanResSum);
         void panel3ComputeStrips(const std::vector<Panel3> &panel3list,  PlanePolar const *pWPolar, const Vector3d &CoG, double alpha, double beta, double QInf, const double *Cp3Vtx, SpanDistribs &SpanResSum);
+        int nearestStrip(SpanDistribs const &SpanRes, Vector3d const &pt) const;
 
         void panel4ComputeInviscidForces(std::vector<Panel4> const &panel4list, const PlanePolar *pWPolar, const Vector3d &cog, double alpha, double beta, double QInf, double *Cp4, const double *Gamma, AeroForces &AF) const;
         void panel3ComputeInviscidForces(std::vector<Panel3> const &panel3list, const PlanePolar *pWPolar, const Vector3d &cog, double alpha, double beta, const double *Cp3Vtx, AeroForces &AF) const;

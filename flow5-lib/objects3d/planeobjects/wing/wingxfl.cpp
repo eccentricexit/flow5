@@ -1835,6 +1835,8 @@ void WingXfl::panel4ComputeStrips(std::vector<Panel4> const &panel4list, PlanePo
         SpanResSum.m_Re.push_back(SpanResSum.m_Chord.at(iStrip) * QInf /pWPolar->viscosity());
         SpanResSum.m_CmC4[iStrip]=SpanResSum.m_CmPressure[iStrip]=0.0;
     }
+    double const qDyn = 0.5*pWPolar->density()*QInf*QInf;
+    SpanResSum.m_FPressure.resize(m_NStation);
 
     iStrip = p = nFlap = 0;
     m_FlapMoment.clear();
@@ -1925,6 +1927,7 @@ void WingXfl::panel4ComputeStrips(std::vector<Panel4> const &panel4list, PlanePo
 
             SpanResSum.m_CmC4[iStrip] *= 1.0 /SpanResSum.m_Chord.at(iStrip)/SpanResSum.m_StripArea.at(iStrip);
             SpanResSum.m_CmPressure[iStrip] = stripmoment.dot(WindSide)/SpanResSum.m_Chord.at(iStrip)/SpanResSum.m_StripArea.at(iStrip);
+            SpanResSum.m_FPressure[iStrip] = stripforce * qDyn;                 // N, body axes
 
             // strip sum results
 /*            double wdforce = stripforce.dot(WindDirection);
@@ -1942,6 +1945,32 @@ void WingXfl::panel4ComputeStrips(std::vector<Panel4> const &panel4list, PlanePo
             p+= surf.NXPanels(); // surface loop ends here anyway
 
     }
+
+    // the tip patches belong to no strip: their force goes to the nearest strip, so that the strips sum to Fsum
+    if(pWPolar->bWingTipMi() && m_NStation>0)
+    {
+        for(int i4=0; i4<m_nPanel4; i4++)
+        {
+            Panel4 const &p4 = panel4list.at(i4+m_FirstPanel4Index);
+            if(!p4.isSidePanel()) continue;
+            PanelForce = p4.normal() * (-Cp4[p4.index()]) * p4.area();      // Newtons/q
+            SpanResSum.m_FPressure[nearestStrip(SpanResSum, p4.CoG())] += PanelForce * qDyn;
+        }
+    }
+}
+
+
+/** The index of the strip whose quarter-chord point is nearest to the point */
+int WingXfl::nearestStrip(SpanDistribs const &SpanRes, Vector3d const &pt) const
+{
+    int iNearest = 0;
+    double dmin = 1.e30;
+    for(int m=0; m<int(SpanRes.m_PtC4.size()); m++)
+    {
+        double d = (SpanRes.m_PtC4.at(m)-pt).norm();
+        if(d<dmin) {dmin = d; iNearest = m;}
+    }
+    return iNearest;
 }
 
 
@@ -1968,6 +1997,10 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
     SpanResSum.m_Re.clear();
     for (int m=0; m<m_NStation; m++) SpanResSum.m_Re.push_back(SpanResSum.m_Chord.at(m) * QInf /pWPolar->viscosity());
 
+    double const qDyn = 0.5*pWPolar->density()*QInf*QInf;
+    SpanResSum.m_FPressure.resize(m_NStation);
+    Vector3d StripPressureForce; // as in panel3ComputeInviscidForces, so that the strips and the tip patches sum to Fsum
+
     int iStrip = 0;
 
     m_FlapMoment.clear();
@@ -1993,6 +2026,7 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
             {
                 //initialize
                 StripForce.set(0.0,0.0,0.0);
+                StripPressureForce.set(0.0,0.0,0.0);
                 stripmoment.set(0.0,0.0,0.0);
 
                 SpanResSum.m_CmC4[iStrip] = 0.0;
@@ -2015,6 +2049,13 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
 
                     StripForce += PanelForce;                                           // Newtons/q
                     NForce = PanelForce.dot(surfaceNormal);                             // Newtons/q
+
+                    if(pWPolar->isTriLinearMethod())
+                    {
+                        for(int iv=0; iv<3; iv++)
+                            StripPressureForce += p3strip.vertexAt(iv).normal() * (-Cp3Vtx[3*idx+iv]) * p3strip.area()/3.0;  // Newtons/q
+                    }
+                    else StripPressureForce += PanelForce;
 
                     leverArmPanelC4  = ForcePt - PtC4Strip;                             // m
                     panelmoment = leverArmPanelC4 * PanelForce;                         // N.m/q
@@ -2048,6 +2089,7 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
 
                 SpanResSum.m_CmC4[iStrip] *= 1.0  /SpanResSum.m_Chord.at(iStrip)/SpanResSum.m_StripArea.at(iStrip);
                 SpanResSum.m_CmPressure[iStrip] = stripmoment.dot(WindSide)/SpanResSum.m_Chord.at(iStrip)/SpanResSum.m_StripArea.at(iStrip);
+                SpanResSum.m_FPressure[iStrip] = StripPressureForce * qDyn;         // N, body axes
 
                 // strip sum results
 //                double wdforce = StripForce.dot(WindDirection);                          // Newtons/q
@@ -2066,6 +2108,25 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
         if(surf.hasTEFlap()) nFlap++;
     }
 
+    // the tip patches belong to no strip: their force goes to the nearest strip, so that the strips sum to Fsum
+    if(pWPolar->bWingTipMi() && m_NStation>0)
+    {
+        for(int i3=0; i3<m_nPanel3; i3++)
+        {
+            Panel3 const &p3 = panel3list.at(i3+m_FirstPanel3Index);
+            if(!p3.isSidePanel()) continue;
+            int idx = p3.index();
+            Vector3d PanelForce;
+            if(pWPolar->isTriLinearMethod())
+            {
+                for(int iv=0; iv<3; iv++)
+                    PanelForce += p3.vertexAt(iv).normal() * (-Cp3Vtx[3*idx+iv]) * p3.area()/3.0;      // Newtons/q
+            }
+            else
+                PanelForce = p3.normal() * (-(Cp3Vtx[3*idx]+Cp3Vtx[3*idx+1]+Cp3Vtx[3*idx+2])/3.0) * p3.area();  // Newtons/q
+            SpanResSum.m_FPressure[nearestStrip(SpanResSum, p3.CoG())] += PanelForce * qDyn;
+        }
+    }
 }
 
 
