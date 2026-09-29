@@ -571,6 +571,36 @@ double P3Analysis::stripArea(Panel3 const &p3, bool bThinSurfaces) const
 }
 
 
+/**
+ * Returns an estimate of the strip's quarter-chord point, used as the application point
+ * of the strip's far-field force when summing moments.
+ * Walks the strip upstream from the trailing panel via the iPU panel links;
+ * for thick surfaces the walk stops at the leading edge i.e. where the chain reaches the top surface.
+ */
+Vector3d P3Analysis::stripQuarterPoint(Panel3 const &p3) const
+{
+    // the trailing nodes have indexes 1 & 2
+    Vector3d ptTE = (p3.vertexAt(1) + p3.vertexAt(2)) * 0.5;
+
+    Vector3d ptLE = p3.CoG();
+    int index = p3.index();
+    do
+    {
+        Panel3 const &p3k = m_Panel3.at(index);
+        if(p3k.isTopPanel()) break;
+        for(int iv=0; iv<3; iv++)
+            if(p3k.vertexAt(iv).x < ptLE.x) ptLE = p3k.vertexAt(iv);
+        if(p3k.m_iPU>=0) index = p3k.m_iPU;
+        else             break;
+    }
+    while (index>=0); //  = while(true)
+
+    Vector3d ptC4 = ptLE + (ptTE-ptLE)*0.25;
+    ptC4.y = ptTE.y;
+    return ptC4;
+}
+
+
 int P3Analysis::nextTopTrailingPanelIndex(Panel3 const &p3) const
 {
     if(!p3.isBotPanel()) return -1;
@@ -892,6 +922,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
 
     Force.set( 0.0, 0.0, 0.0);
     Moment.set(0.0, 0.0, 0.0);
+    m_MomentFF.set(0.0, 0.0, 0.0);
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
 
@@ -925,6 +956,19 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 stripforce *= GammaStrip * m_pPolar3d->density();     // N
                 Force += stripforce;
 
+                // the strip's far-field force for the moment sum: the Kutta-Joukowski lift plus the
+                // Trefftz-plane force, evaluated as in trefftzDrag; the wake-induced velocity used for
+                // the force above is left out: it is not force-free under a lateral perturbation (issue #7)
+                Vector3d WgFF;
+                midWakePoint(p3W, left, right);
+                mid = (left + right)/2.0;
+                getVelocityVector(mid, Mu3, Sigma3, WgFF, 0.0001, true, true);
+                WgFF *= 0.5;
+                WgFF += VInf.at(i3);
+                stripforce  =  WgFF * vortex;
+                stripforce *= GammaStrip * m_pPolar3d->density();     // N
+                m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
+
  //               m++;
             }
         }
@@ -956,6 +1000,17 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             stripforce *= GammaStrip * m_pPolar3d->density();     // N
 
             Force += stripforce;
+
+            // same far-field force as in the mid-panel branch above
+            Vector3d WgFF;
+            midWakePoint(p3W, left, right);
+            mid = (left + right)/2.0;
+            getVelocityVector(mid, Mu3, Sigma3, WgFF, Vortex::coreRadius(), true, true);
+            WgFF *= 0.5;
+            WgFF += VInf.at(i3);
+            stripforce  = vortex * WgFF;
+            stripforce *= GammaStrip * m_pPolar3d->density();     // N
+            m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
 //            m++;
         }
     }

@@ -172,6 +172,8 @@ class FL5LIB_EXPORT PanelAnalysis
         std::vector<Vector3d> m_vVLocal;              /**< the array of unit velocity vectors for beta=PI/2, in local coordinates */
         std::vector<Vector3d> m_wVLocal;              /**< the array of unit velocity vectors for aoa=PI/2, in local coordinates */
 
+        Vector3d m_MomentFF;                 /**< The moment about the CoG of the far-field strip forces, set by forces() */
+
         std::vector<double> m_Cp;                /**< The array of pressure coefficients on the panels. 1 value/panel in the case of the quad methods, 3 values/panel in the case of the triangular methods */
         std::vector<double> m_Mu;                /**< The array of doublet strengths, or vortex circulations, associated to the panels. 1 value/panel in the case of the quad methods, 3 values/panel in the case of the triangular methods */
         std::vector<double> m_Sigma;             /**< The array of resulting source strengths of the analysis. 1 value/panel for all methods. */
