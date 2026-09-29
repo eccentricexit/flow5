@@ -627,8 +627,8 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     mkl_set_num_threads(s_MaxThreads);;
 #endif
 
-    Vector3d Forcem, Momentm;
-    Vector3d Forcep, Momentp;
+    Vector3d Forcem, Momentm, MomentFFm;
+    Vector3d Forcep, Momentp, MomentFFp;
     Vector3d V0, is, js, ks, WindDirection, WindNormal;
 
     Vector3d Vim, Vjm, Vkm, Vip, Vjp, Vkp;
@@ -815,8 +815,10 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     {
         mup = m_VpRHS.data();
         forces(mup, Sigma.data()+1*N, alpha, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
+        MomentFFp = m_MomentFF;
         mum = m_VmRHS.data();
         forces(mum, Sigma.data()+4*N, alpha, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
+        MomentFFm = m_MomentFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -837,13 +839,17 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
 
         computeOnBodyCp(VField.at(1), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+1*N, alpha, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
+        MomentFFp = m_MomentFF;
 
         computeOnBodyCp(VField.at(4), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+4*N, alpha, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
+        MomentFFm = m_MomentFF;
     }
     SD.Yv = (Forcem - Forcep).dot(js)   /deltaspeed/2.0;
-    SD.Lv = (Momentm - Momentp).dot(is) /deltaspeed/2.0;
-    SD.Nv = (Momentm - Momentp).dot(ks) /deltaspeed/2.0;
+    // the on-body pressure moment picks up a spurious response to lateral perturbations (cf. issue #7):
+    // the roll and yaw derivatives are based on the moment of the far-field strip forces instead
+    SD.Lv = (MomentFFm - MomentFFp).dot(is) /deltaspeed/2.0;
+    SD.Nv = (MomentFFm - MomentFFp).dot(ks) /deltaspeed/2.0;
 
     // z-derivatives________________________
 //    alpha = atan2(Vkm.z, Vkm.x)* 180.0/PI;
