@@ -2542,11 +2542,13 @@ void PlaneTask::setControlPositions(PlaneXfl const *pPlaneXfl, PlanePolar const 
     double totalAngle(0.0), deltaangle(0);
     double gain(0);
     std::vector<Node> node = refnodes;
+    std::vector<std::vector<double>> flapangles(pPlaneXfl->nWings());
 
     int nCtrl = 0;
     for(int iw=0; iw<pPlaneXfl->nWings(); iw++)
     {
         WingXfl const *pWing = pPlaneXfl->wingAt(iw);
+        flapangles[iw].assign(pWing->nSurfaces(), 0.0);
         int iCtrl=0;
 
         for (int jSurf=0; jSurf<pWing->nSurfaces(); jSurf++)
@@ -2571,6 +2573,7 @@ void PlaneTask::setControlPositions(PlaneXfl const *pPlaneXfl, PlanePolar const 
                     outstr +=strange;
 
                     pPlaneXfl->rotateFlapNodes(panel3, node, surf, surf.hingePoint(), surf.hingeVector(), deltaangle);
+                    flapangles[iw][jSurf] = deltaangle;
                 }
                 iCtrl++;
                 nCtrl++;
@@ -2578,6 +2581,7 @@ void PlaneTask::setControlPositions(PlaneXfl const *pPlaneXfl, PlanePolar const 
         }
     }
 
+    pPlaneXfl->sealFlapEnds(panel3, refnodes, node, flapangles);
 
     TriMesh::rebuildPanelsFromNodes(panel3, node);
 
