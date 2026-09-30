@@ -183,7 +183,7 @@ class FL5LIB_EXPORT PanelAnalysis
         bool m_bSequence;           /**< true if the calculation is should be performed for a range of aoa */
         bool m_bWarning;     /**< true if one the OpPoints could not be properly interpolated */
         bool m_bMatrixError;
-        bool m_bFarFieldMoment;      /**< true if forces() should also evaluate the far-field moment m_MomentFF; it is costly, and only computeTranslationDerivatives() needs it */
+        bool m_bFarFieldMoment;      /**< true if forces() should also evaluate the far-field moment m_MomentFF; it is costly, and only the moment derivatives (computeTranslationDerivatives(), computeAngularDerivatives()) need it */
 
         xfl::enumAnalysisStatus m_AnalysisStatus;
         int m_nBlocks;              /** the number of row blocks for multithreading */
