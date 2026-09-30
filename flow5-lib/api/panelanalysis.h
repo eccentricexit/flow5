@@ -137,6 +137,10 @@ class FL5LIB_EXPORT PanelAnalysis
 
         virtual void testResults(double alpha, double beta, double QInf) const = 0;
 
+        void setFarField(bool b) {m_bFarField=b;}
+        Vector3d const &farFieldForce() const {return m_ForceFF;}
+        Vector3d const &referenceFarFieldForce() const {return m_ForceFF0;}
+
         static void setMaxThreadCount(int maxthreads) {s_MaxThreads=maxthreads;}
         static void setDoublePrecision(bool bDouble) {s_bDoublePrecision=bDouble;}
         static bool bDoublePrecision() {return s_bDoublePrecision;}
@@ -172,6 +176,8 @@ class FL5LIB_EXPORT PanelAnalysis
         std::vector<Vector3d> m_vVLocal;              /**< the array of unit velocity vectors for beta=PI/2, in local coordinates */
         std::vector<Vector3d> m_wVLocal;              /**< the array of unit velocity vectors for aoa=PI/2, in local coordinates */
 
+        Vector3d m_ForceFF;                  /**< The sum of the far-field strip forces, at the mid-wake point as the force of the polar, set by forces() with m_MomentFF; forces() returns the force at the trailing wake point */
+        Vector3d m_ForceFF0;                 /**< The far-field force of the reference state of computeTranslationDerivatives(), for the control derivatives */
         Vector3d m_MomentFF;                 /**< The moment about the CoG of the far-field strip forces, set by forces() */
 
         std::vector<double> m_Cp;                /**< The array of pressure coefficients on the panels. 1 value/panel in the case of the quad methods, 3 values/panel in the case of the triangular methods */
@@ -183,7 +189,7 @@ class FL5LIB_EXPORT PanelAnalysis
         bool m_bSequence;           /**< true if the calculation is should be performed for a range of aoa */
         bool m_bWarning;     /**< true if one the OpPoints could not be properly interpolated */
         bool m_bMatrixError;
-        bool m_bFarFieldMoment;      /**< true if forces() should also evaluate the far-field moment m_MomentFF; it is costly, and only the moment derivatives (computeTranslationDerivatives(), computeAngularDerivatives()) need it */
+        bool m_bFarField;            /**< true if forces() should also evaluate the far-field force m_ForceFF and moment m_MomentFF; it is costly, and only the stability and control derivatives (computeTranslationDerivatives(), computeAngularDerivatives(), PlaneTask::computeControlDerivatives()) need it */
 
         xfl::enumAnalysisStatus m_AnalysisStatus;
         int m_nBlocks;              /** the number of row blocks for multithreading */

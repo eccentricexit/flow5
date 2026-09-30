@@ -148,6 +148,7 @@ class FL5LIB_EXPORT PlaneTask : public Task3d
         std::vector<Vector3d> m_WingForce;   /**< The array of calculated resulting forces acting on the wings in wind axis (N/q) */
 
         Vector3d m_Force0;  /** The calculated equilibrium force  @todo check body or wind axis*/
+        Vector3d m_Force0FF; /** The equilibrium far-field force, the reference of the control derivatives in the plane of symmetry */
         Vector3d m_Moment0; /** The calculated equilibrium moment @todo check body or wind axis */
 
         // temp variables used to create the operating point

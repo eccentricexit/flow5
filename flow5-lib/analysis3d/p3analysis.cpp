@@ -911,6 +911,13 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 * strip's panel forces is a force that belongs at the strip's leading edge: its moment is added to the on-body moment.
 * Then the moment and the force agree in what they include, and the neutral point does not depend on the CG.
 * Thick surfaces need no correction: their pressures carry the suction.
+*
+* The force returned is the sum of the strips' forces at their trailing wake points. If m_bFarField is set, forces() also sums the
+* far-field strip forces, at the mid-wake point as the force of the polar, in m_ForceFF, and their moment about the CoG in m_MomentFF.
+* A trailing wake point that lies in another surface's wake sheet (a stabiliser at the wing's height) does not see the far-field velocity:
+* the derivatives taken from it are wrong, so the derivatives in the plane of symmetry (Xu, Zu, Xw, Zw, Xq, Zq) and the control
+* derivatives take m_ForceFF. The lateral ones stay on the trailing wake point: the far-field velocity is not force-free under a lateral
+* perturbation (issue #7).
 */
 void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, double beta, Vector3d const &CoG, bool bFuseMi,
                         std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment)
@@ -929,6 +936,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
 
     Force.set( 0.0, 0.0, 0.0);
     Moment.set(0.0, 0.0, 0.0);
+    m_ForceFF.set(0.0, 0.0, 0.0);
     m_MomentFF.set(0.0, 0.0, 0.0);
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
@@ -968,7 +976,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 stripforce *= GammaStrip * m_pPolar3d->density();     // N
                 Force += stripforce;
 
-                // the strip's far-field force for the moment sum: the Kutta-Joukowski lift plus the
+                // the strip's far-field force: the Kutta-Joukowski lift plus the
                 // Trefftz-plane force, evaluated at the mid-wake point as in trefftzDrag;
                 // the trailing-point velocity used for the force above is left out: the wake-induced
                 // velocity is not force-free under a lateral perturbation (issue #7)
@@ -982,7 +990,8 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                     WgFF += VInf.at(i3);
                     stripforce  =  WgFF * vortex;
                     stripforce *= GammaStrip * m_pPolar3d->density();     // N
-                    if(m_bFarFieldMoment) m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
+                    m_ForceFF += stripforce;
+                    if(m_bFarField) m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
 
                     // walk the strip upstream, to its leading edge
                     int iStrip = int(stripFF.size());
@@ -1031,7 +1040,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             Force += stripforce;
 
             // same far-field force as in the mid-panel branch above
-            if(m_bFarFieldMoment)
+            if(m_bFarField)
             {
                 Vector3d WgFF;
                 midWakePoint(p3W, left, right);
@@ -1041,6 +1050,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 WgFF += VInf.at(i3);
                 stripforce  = vortex * WgFF;
                 stripforce *= GammaStrip * m_pPolar3d->density();     // N
+                m_ForceFF += stripforce;
                 m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
             }
 //            m++;
@@ -1064,7 +1074,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             Moment += PanelLeverArm * PanelForce;                     // N.m/rho
             if(stripOfPanel[i3]>=0) stripFP[stripOfPanel[i3]] += PanelForce;   // N/rho
             // the far-field strip forces only cover the wings: the fuse keeps its on-body pressure moment
-            if(m_bFarFieldMoment && p3.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce * m_pPolar3d->density();  // N.m
+            if(m_bFarField && p3.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce * m_pPolar3d->density();  // N.m
         }
     }
 
