@@ -1340,6 +1340,13 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
             {
                 pWing->panel3ComputeInviscidForces(m_pP3A->m_Panel3, m_pPlPolar, CoG, alpha, beta, Cp3Vtx, m_PartAF[iw]);
                 pWing->panel3ComputeStrips(m_pP3A->m_Panel3, m_pPlPolar, CoG, alpha, beta, QInf, Cp3Vtx, m_SpanDistFF[iw]);
+
+                // thin surfaces: add the moment of the leading-edge force that the panel pressures miss, as P3Analysis::forces() does
+                if(m_pPlPolar->bThinSurfaces())
+                {
+                    double const qDyn = 0.5*m_pPlPolar->density()*QInf*QInf;
+                    m_PartAF[iw].addMi(pWing->leadingEdgeMoment(m_SpanDistFF[iw], CoG) * (1.0/qDyn));   // N.m/q
+                }
             }
 
             if(bInGeomAxes)
@@ -1577,6 +1584,7 @@ void PlaneTask::scaleResultsToSpeed(double vOld, double vNew)
             {
                 m_SpanDistFF[iw].m_F[m]     *= ratio*ratio;
                 if(m<int(m_SpanDistFF[iw].m_FPressure.size())) m_SpanDistFF[iw].m_FPressure[m] *= ratio*ratio;
+                if(m<int(m_SpanDistFF[iw].m_FInduced.size())) m_SpanDistFF[iw].m_FInduced[m] *= ratio*ratio;
                 m_SpanDistFF[iw].m_Vd[m]    *= ratio;
                 m_SpanDistFF[iw].m_Gamma[m] *= ratio;
             }
