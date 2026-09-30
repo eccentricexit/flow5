@@ -1024,7 +1024,9 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
 
     Force.set( 0.0, 0.0, 0.0);
     Moment.set(0.0, 0.0, 0.0);
+    m_ForceFF.set(0.0, 0.0, 0.0);
     m_MomentFF.set(0.0, 0.0, 0.0);
+    m_MomentLocal.set(0.0, 0.0, 0.0);
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
 
@@ -1078,7 +1080,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
                 // Trefftz-plane force, evaluated at the mid-wake point as in trefftzDrag;
                 // the trailing-point velocity used for the force above is left out: the wake-induced
                 // velocity is not force-free under a lateral perturbation (issue #7)
-                if(m_bFarFieldMoment)
+                if(m_bFarField)
                 {
                     Vector3d WgFF;
                     Panel4 const *p4w = m_WakePanel4.data() + p4.iWake();
@@ -1168,7 +1170,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
         }
         Moment += PanelLeverArm * PanelForce ;                     // N.m/rho
         // the far-field strip forces only cover the wings: the fuse keeps its on-body pressure moment
-        if(m_bFarFieldMoment && p4.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce;  // N.m/rho
+        if(m_bFarField && p4.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce;  // N.m/rho
     }
 
     if(m_pPolar3d->isViscous())
@@ -1179,6 +1181,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
 
     Force  *= m_pPolar3d->density();                          // N
     Moment *= m_pPolar3d->density();                          // N.m
+    m_ForceFF = Force;                                        // the force of the quad methods is the far-field force
     if(m_pPolar3d->isVLM()) m_MomentFF = Moment;              // the on-body moment is vortex-based for VLM: keep it
     else                    m_MomentFF *= m_pPolar3d->density(); // N.m
 }
