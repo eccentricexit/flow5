@@ -2050,6 +2050,7 @@ bool PlaneTask::computeStability(PlaneOpp *pPOpp, bool bOutput)
     // Compute stability and control derivatives in stability axes
     traceStdLog("             Calculating stability derivatives\n");
     m_pPA->computeStabilityDerivatives(pPOpp->alpha(), pPOpp->QInf(), pPOpp->cog(), m_pPlPolar->bFuseMi(), pPOpp->m_SD, m_Force0, m_Moment0);
+    m_Force0FF = m_pPA->referenceFarFieldForce();
     if(isCancelled()) return true;
 
     pPOpp->m_SD.resizeControlDerivatives(m_pPlPolar->nAVLCtrls());
@@ -2394,6 +2395,9 @@ void PlaneTask::computeControlDerivatives(double t7ctrl, double alphaeq, double 
 
     double DeltaCtrl = 0.001;
 
+    // the force of the derivatives in the plane of symmetry is the far-field strip force, the side force the one at the trailing wake point
+    m_pPA->setFarField(true);
+
     for(int ie=0; ie<m_pPlPolar->nAVLCtrls(); ie++)
     {
         traceStdLog("             Processing control set " + m_pPlPolar->AVLCtrl(ie).name() + EOLstr);
@@ -2471,14 +2475,16 @@ void PlaneTask::computeControlDerivatives(double t7ctrl, double alphaeq, double 
 
         // make the forward difference with nominal results
         // which gives the stability derivative for a rotation equal to deltaCtrl x gain
-        SD.Xde[ie] = (Force  - m_Force0 ).dot(is) / DeltaCtrl;
-        SD.Yde[ie] = (Force  - m_Force0 ).dot(js) / DeltaCtrl;
-        SD.Zde[ie] = (Force  - m_Force0 ).dot(ks) / DeltaCtrl;
+        Vector3d const &ForceFF = m_pPA->farFieldForce();
+        SD.Xde[ie] = (ForceFF - m_Force0FF).dot(is) / DeltaCtrl;
+        SD.Yde[ie] = (Force   - m_Force0  ).dot(js) / DeltaCtrl;
+        SD.Zde[ie] = (ForceFF - m_Force0FF).dot(ks) / DeltaCtrl;
         SD.Lde[ie] = (Moment - m_Moment0).dot(is) / DeltaCtrl;  // N.m/ctrl
         SD.Mde[ie] = (Moment - m_Moment0).dot(js) / DeltaCtrl;
         SD.Nde[ie] = (Moment - m_Moment0).dot(ks) / DeltaCtrl;
     }
 
+    m_pPA->setFarField(false);
     m_pPA->restorePanels();
 }
 
