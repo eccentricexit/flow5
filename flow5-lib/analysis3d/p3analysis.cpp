@@ -918,6 +918,10 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 * the derivatives taken from it are wrong, so the derivatives in the plane of symmetry (Xu, Zu, Xw, Zw, Xq, Zq) and the control
 * derivatives take m_ForceFF. The lateral ones stay on the trailing wake point: the far-field velocity is not force-free under a lateral
 * perturbation (issue #7).
+*
+* m_MomentFF applies each strip's far-field force at the strip's quarter-chord point, so it has no chordwise load. m_MomentLocal is the
+* moment about these points of the strips' own chordwise loads: the panel pressures and, on thin surfaces, the leading-edge force. The
+* pitch damping of a wing needs it, since its load moves along the chord in a pitch rate.
 */
 void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, double beta, Vector3d const &CoG, bool bFuseMi,
                         std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment)
@@ -938,12 +942,14 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     Moment.set(0.0, 0.0, 0.0);
     m_ForceFF.set(0.0, 0.0, 0.0);
     m_MomentFF.set(0.0, 0.0, 0.0);
+    m_MomentLocal.set(0.0, 0.0, 0.0);
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
 
-    // the thin strips' far-field forces (N), their leading edge points, the sums of their panel forces (N/rho),
-    // and the strip that each panel belongs to (-1 for none: thick surfaces, fuselage)
-    std::vector<Vector3d> stripFF, stripLE, stripFP;
+    // the strips' far-field forces (N), their quarter-chord and leading edge points, the sums of their panel forces (N/rho),
+    // whether their leading-edge force is to be added (thin strips), and the strip that each panel belongs to (-1 for none: fuselage, tips)
+    std::vector<Vector3d> stripFF, stripQP, stripLE, stripFP;
+    std::vector<bool> stripThin;
     std::vector<int> stripOfPanel(nPanels(), -1);
 
 //    int m=0;
@@ -991,7 +997,8 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                     stripforce  =  WgFF * vortex;
                     stripforce *= GammaStrip * m_pPolar3d->density();     // N
                     m_ForceFF += stripforce;
-                    if(m_bFarField) m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
+                    Vector3d quarterpoint = stripQuarterPoint(p3);
+                    if(m_bFarField) m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
 
                     // walk the strip upstream, to its leading edge
                     int iStrip = int(stripFF.size());
@@ -1003,8 +1010,10 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                         pLast = &m_Panel3.at(pLast->m_iPU);
                     }
                     stripFF.push_back(stripforce);
+                    stripQP.push_back(quarterpoint);
                     stripLE.push_back(pLast->leadingEdgeMidpoint());
                     stripFP.push_back(Vector3d());
+                    stripThin.push_back(true);
                 }
 
  //               m++;
@@ -1051,7 +1060,24 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 stripforce  = vortex * WgFF;
                 stripforce *= GammaStrip * m_pPolar3d->density();     // N
                 m_ForceFF += stripforce;
-                m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
+                Vector3d quarterpoint = stripQuarterPoint(p3);
+                m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
+
+                // the panels of the strip: the chain of the iPU links from the bottom trailing panel runs along the bottom surface
+                // and round the leading edge to the top trailing panel
+                int iStrip = int(stripFF.size());
+                Panel3 const *pLast = &p3;
+                stripOfPanel[i3] = iStrip;
+                while(pLast->m_iPU>=0)
+                {
+                    stripOfPanel[pLast->m_iPU] = iStrip;
+                    pLast = &m_Panel3.at(pLast->m_iPU);
+                }
+                stripFF.push_back(stripforce);
+                stripQP.push_back(quarterpoint);
+                stripLE.push_back(quarterpoint);
+                stripFP.push_back(Vector3d());
+                stripThin.push_back(false);
             }
 //            m++;
         }
@@ -1072,7 +1098,12 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             PanelForce = p3.normal() * (-Cp) * p3.area() *1/2.*QInf*QInf;      // Newtons/rho
             PanelLeverArm = p3.CoG() - CoG;
             Moment += PanelLeverArm * PanelForce;                     // N.m/rho
-            if(stripOfPanel[i3]>=0) stripFP[stripOfPanel[i3]] += PanelForce;   // N/rho
+            if(stripOfPanel[i3]>=0)
+            {
+                int iStrip = stripOfPanel[i3];
+                stripFP[iStrip] += PanelForce;   // N/rho
+                m_MomentLocal += (p3.CoG() - stripQP[iStrip]) * PanelForce * m_pPolar3d->density();   // N.m
+            }
             // the far-field strip forces only cover the wings: the fuse keeps its on-body pressure moment
             if(m_bFarField && p3.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce * m_pPolar3d->density();  // N.m
         }
@@ -1100,7 +1131,12 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
 
     // the leading-edge force of the thin strips: what the far field carries and the panel forces do not
     for(unsigned int is=0; is<stripFF.size(); is++)
-        Moment += (stripLE[is] - CoG) * (stripFF[is] - stripFP[is] * m_pPolar3d->density());   // N.m
+    {
+        if(!stripThin[is]) continue;
+        Vector3d leforce = stripFF[is] - stripFP[is] * m_pPolar3d->density();   // N
+        Moment += (stripLE[is] - CoG) * leforce;   // N.m
+        m_MomentLocal += (stripLE[is] - stripQP[is]) * leforce;   // N.m
+    }
 }
 
 

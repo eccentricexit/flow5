@@ -1056,17 +1056,19 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     SD.Lp = (Momentp-Momentm).dot(is) /rotationrate/2.0;
     SD.Np = (Momentp-Momentm).dot(ks) /rotationrate/2.0;
 
-    // q-derivatives
+    // q-derivatives: the moment of the far-field strip forces, which sit at the strips' quarter-chord points, plus the strips' own
+    // chordwise loads about these points: the first alone has no chordwise load, and a wing with its CoG at its quarter chord
+    // would have no pitch damping
     if(m_pPolar3d->isQuadMethod())
     {
         mup = m_VpRHS.data();
         forces(mup, Sigma.data()+1*N, alphaeq, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
         ForceFFp = m_ForceFF;
-        Momentp = m_MomentFF;
+        Momentp = m_MomentFF + m_MomentLocal;
         mum = m_VmRHS.data();
         forces(mum, Sigma.data()+4*N, alphaeq, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
         ForceFFm = m_ForceFF;
-        Momentm = m_MomentFF;
+        Momentm = m_MomentFF + m_MomentLocal;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -1087,11 +1089,11 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         computeOnBodyCp(VField.at(1), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+1*N, alphaeq, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
         ForceFFp = m_ForceFF;
-        Momentp = m_MomentFF;
+        Momentp = m_MomentFF + m_MomentLocal;
         computeOnBodyCp(VField.at(4), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+4*N, alphaeq, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
         ForceFFm = m_ForceFF;
-        Momentm = m_MomentFF;
+        Momentm = m_MomentFF + m_MomentLocal;
     }
     SD.Xq = (ForceFFp -ForceFFm ).dot(is) /rotationrate/2.0;
     SD.Zq = (ForceFFp -ForceFFm ).dot(ks) /rotationrate/2.0;

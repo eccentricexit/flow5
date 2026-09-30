@@ -1026,6 +1026,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
     Moment.set(0.0, 0.0, 0.0);
     m_ForceFF.set(0.0, 0.0, 0.0);
     m_MomentFF.set(0.0, 0.0, 0.0);
+    m_MomentLocal.set(0.0, 0.0, 0.0);
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
 
