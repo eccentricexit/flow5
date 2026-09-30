@@ -66,7 +66,7 @@ PanelAnalysis::PanelAnalysis()
     m_bMatrixError = false;
     m_bSequence    = false;
     m_bWarning     = false;
-    m_bFarFieldMoment = false;
+    m_bFarField = false;
 
     m_nBlocks     = s_MaxThreads;
 
@@ -628,8 +628,8 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     mkl_set_num_threads(s_MaxThreads);;
 #endif
 
-    Vector3d Forcem, Momentm, MomentFFm;
-    Vector3d Forcep, Momentp, MomentFFp;
+    Vector3d Forcem, Momentm, ForceFFm, MomentFFm;
+    Vector3d Forcep, Momentp, ForceFFp, MomentFFp;
     Vector3d V0, is, js, ks, WindDirection, WindNormal;
 
     Vector3d Vim, Vjm, Vkm, Vip, Vjp, Vkp;
@@ -730,10 +730,14 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         pRHSVertex.resize(3*N);
     }
 
+    // forces() also returns the far-field strip force m_ForceFF: the derivatives in the plane of symmetry (Xu, Zu, Xw, Zw, Xq, Zq) and the
+    // control derivatives take it, the lateral ones the force at the trailing wake point (see P3Analysis::forces())
+    m_bFarField = true;
     if(m_pPolar3d->isQuadMethod())
     {
         mup = m_cRHS.data();
         forces(mup, Sigma.data()+6*N, alpha, beta, CoG, bFuseMi, VField.at(6), Force0, Moment0);
+        m_ForceFF0 = m_ForceFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -755,6 +759,7 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
 
         computeOnBodyCp(VInf, m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+6*N, alpha, beta, CoG, bFuseMi, VField.at(6), Force0, Moment0);
+        m_ForceFF0 = m_ForceFF;
     }
 
     //________________________________________________
@@ -774,8 +779,10 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     {
         mup = m_UpRHS.data();
         forces(mup, Sigma.data()+0*N, alpha, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
+        ForceFFp = m_ForceFF;
         mum = m_UmRHS.data();
         forces(mum, Sigma.data()+3*N, alpha, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
+        ForceFFm = m_ForceFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -799,20 +806,21 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
 
         computeOnBodyCp(VField.at(0), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+0*N, alpha, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
+        ForceFFp = m_ForceFF;
 
         computeOnBodyCp(VField.at(3), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+3*N, alpha, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
+        ForceFFm = m_ForceFF;
     }
 
-    SD.Xu = (Forcem - Forcep ).dot(is) /deltaspeed/2.0;
-    SD.Zu = (Forcem - Forcep ).dot(ks) /deltaspeed/2.0;
+    SD.Xu = (ForceFFm - ForceFFp ).dot(is) /deltaspeed/2.0;
+    SD.Zu = (ForceFFm - ForceFFp ).dot(ks) /deltaspeed/2.0;
     SD.Mu = (Momentm- Momentp).dot(js) /deltaspeed/2.0;
 
 
     // y-derivatives________________________
 //    alpha = atan2(Vjm.z, Vjm.x)*180.0/PI;// =alphaeq....
     alpha = alphaeq;
-    m_bFarFieldMoment = true; // Lv and Nv are the only users of the far-field moment
     if(m_pPolar3d->isQuadMethod())
     {
         mup = m_VpRHS.data();
@@ -847,7 +855,6 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         forces(mum, Sigma.data()+4*N, alpha, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
         MomentFFm = m_MomentFF;
     }
-    m_bFarFieldMoment = false;
     SD.Yv = (Forcem - Forcep).dot(js)   /deltaspeed/2.0;
     // the on-body pressure moment picks up a spurious response to lateral perturbations (cf. issue #7):
     // the roll and yaw derivatives are based on the moment of the far-field strip forces instead
@@ -861,8 +868,10 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     {
         mup = m_WpRHS.data();
         forces(mup, Sigma.data()+2*N, alpha, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
+        ForceFFp = m_ForceFF;
         mum = m_WmRHS.data();
         forces(mum, Sigma.data()+5*N, alpha, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
+        ForceFFm = m_ForceFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -882,12 +891,15 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
 
         computeOnBodyCp(VField.at(2), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+2*N, alpha, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
+        ForceFFp = m_ForceFF;
 
         computeOnBodyCp(VField.at(5), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+5*N, alpha, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
+        ForceFFm = m_ForceFF;
     }
-    SD.Xw = (Forcem - Forcep).dot(is)   /deltaspeed/2.0;
-    SD.Zw = (Forcem - Forcep).dot(ks)   /deltaspeed/2.0;
+    m_bFarField = false;
+    SD.Xw = (ForceFFm - ForceFFp).dot(is) /deltaspeed/2.0;
+    SD.Zw = (ForceFFm - ForceFFp).dot(ks) /deltaspeed/2.0;
     SD.Mw = (Momentm - Momentp).dot(js) /deltaspeed/2.0;
 }
 
@@ -899,8 +911,8 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     mkl_set_num_threads(s_MaxThreads);
 #endif
 
-    Vector3d Forcem, Momentm, Rism, Rjsm, Rksm;
-    Vector3d Forcep, Momentp, Risp, Rjsp, Rksp;
+    Vector3d Forcem, ForceFFm, Momentm, Rism, Rjsm, Rksm;
+    Vector3d Forcep, ForceFFp, Momentp, Risp, Rjsp, Rksp;
     Vector3d V0, is, js, ks, CGM, WindDirection, WindNormal;
 
     double beta(0.0);
@@ -926,7 +938,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     // like Lv and Nv, the rate moment derivatives are the moment of the far-field strip forces: on thick surfaces the on-body pressure
     // moment carries the panel method's own residual (a spurious drag that turns with the rotation), which put Cnr 20 to 30 percent
     // above AVL's and TRILINEAR's Cmq 20 percent below it (issue #7 item 5)
-    m_bFarFieldMoment = true;
+    m_bFarField = true;
 
     double rotationrate = 0.01;         //  rad/s for difference estimation
 
@@ -1049,9 +1061,11 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     {
         mup = m_VpRHS.data();
         forces(mup, Sigma.data()+1*N, alphaeq, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
+        ForceFFp = m_ForceFF;
         Momentp = m_MomentFF;
         mum = m_VmRHS.data();
         forces(mum, Sigma.data()+4*N, alphaeq, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
+        ForceFFm = m_ForceFF;
         Momentm = m_MomentFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
@@ -1072,13 +1086,15 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         }
         computeOnBodyCp(VField.at(1), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+1*N, alphaeq, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
+        ForceFFp = m_ForceFF;
         Momentp = m_MomentFF;
         computeOnBodyCp(VField.at(4), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+4*N, alphaeq, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
+        ForceFFm = m_ForceFF;
         Momentm = m_MomentFF;
     }
-    SD.Xq = (Forcep -Forcem ).dot(is) /rotationrate/2.0;
-    SD.Zq = (Forcep -Forcem ).dot(ks) /rotationrate/2.0;
+    SD.Xq = (ForceFFp -ForceFFm ).dot(is) /rotationrate/2.0;
+    SD.Zq = (ForceFFp -ForceFFm ).dot(ks) /rotationrate/2.0;
     SD.Mq = (Momentp-Momentm).dot(js) /rotationrate/2.0;
 
     // r-derivatives
@@ -1118,7 +1134,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     SD.Yr = (Forcep -Forcem ).dot(js) /rotationrate/2.0;
     SD.Lr = (Momentp-Momentm).dot(is) /rotationrate/2.0;
     SD.Nr = (Momentp-Momentm).dot(ks) /rotationrate/2.0;
-    m_bFarFieldMoment = false;
+    m_bFarField = false;
 }
 
 /** Sets the vortons from a pre-calculated PlaneOpp.
