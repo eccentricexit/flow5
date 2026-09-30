@@ -923,6 +923,11 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         std::fill(VField[i].begin(), VField[i].end(), Vector3d());
     }
 
+    // like Lv and Nv, the rate moment derivatives are the moment of the far-field strip forces: on thick surfaces the on-body pressure
+    // moment carries the panel method's own residual (a spurious drag that turns with the rotation), which put Cnr 20 to 30 percent
+    // above AVL's and TRILINEAR's Cmq 20 percent below it (issue #7 item 5)
+    m_bFarFieldMoment = true;
+
     double rotationrate = 0.01;         //  rad/s for difference estimation
 
     // Define the stability axes
@@ -1004,8 +1009,10 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     {
         mup = m_UpRHS.data();
         forces(mup, Sigma.data()+0*N, alphaeq, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
+        Momentp = m_MomentFF;
         mum = m_UmRHS.data();
         forces(mum, Sigma.data()+3*N, alphaeq, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
+        Momentm = m_MomentFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -1028,8 +1035,10 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         }
         computeOnBodyCp(VField.at(0), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+0*N, alphaeq, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
+        Momentp = m_MomentFF;
         computeOnBodyCp(VField.at(3), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+3*N, alphaeq, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
+        Momentm = m_MomentFF;
     }
     SD.Yp = (Forcep -Forcem ).dot(js) /rotationrate/2.0;
     SD.Lp = (Momentp-Momentm).dot(is) /rotationrate/2.0;
@@ -1040,8 +1049,10 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     {
         mup = m_VpRHS.data();
         forces(mup, Sigma.data()+1*N, alphaeq, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
+        Momentp = m_MomentFF;
         mum = m_VmRHS.data();
         forces(mum, Sigma.data()+4*N, alphaeq, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
+        Momentm = m_MomentFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -1061,8 +1072,10 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         }
         computeOnBodyCp(VField.at(1), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+1*N, alphaeq, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
+        Momentp = m_MomentFF;
         computeOnBodyCp(VField.at(4), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+4*N, alphaeq, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
+        Momentm = m_MomentFF;
     }
     SD.Xq = (Forcep -Forcem ).dot(is) /rotationrate/2.0;
     SD.Zq = (Forcep -Forcem ).dot(ks) /rotationrate/2.0;
@@ -1073,8 +1086,10 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     {
         mup = m_WpRHS.data();
         forces(mup, Sigma.data()+2*N, alphaeq, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
+        Momentp = m_MomentFF;
         mum = m_WmRHS.data();
         forces(mum, Sigma.data()+5*N, alphaeq, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
+        Momentm = m_MomentFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -1094,13 +1109,16 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         }
         computeOnBodyCp(VField.at(2), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+2*N, alphaeq, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
+        Momentp = m_MomentFF;
         computeOnBodyCp(VField.at(5), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+5*N, alphaeq, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
+        Momentm = m_MomentFF;
     }
 
     SD.Yr = (Forcep -Forcem ).dot(js) /rotationrate/2.0;
     SD.Lr = (Momentp-Momentm).dot(is) /rotationrate/2.0;
     SD.Nr = (Momentp-Momentm).dot(ks) /rotationrate/2.0;
+    m_bFarFieldMoment = false;
 }
 
 /** Sets the vortons from a pre-calculated PlaneOpp.
