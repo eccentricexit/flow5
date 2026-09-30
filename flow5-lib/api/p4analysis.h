@@ -117,6 +117,7 @@ class FL5LIB_EXPORT P4Analysis : public PanelAnalysis
         Vector3d midWakePoint(const Panel4 *pWakePanel) const;
         const Panel4 *trailingWakePanel(Panel4 const *pWakePanel) const;
         int nextTopTrailingPanelIndex(Panel4 const &p4) const;
+        Vector3d stripQuarterPoint(Panel4 const &p4) const;
 
         void inducedForce(int nPanel3, double QInf, double alpha, double beta, int pos, Vector3d &ForceBodyAxes, SpanDistribs &SpanResFF) const override;
         void trefftzDrag(int nPanels, double QInf, double alpha, double beta, int pos, Vector3d &FFForce, SpanDistribs &SpanResFF) const override;

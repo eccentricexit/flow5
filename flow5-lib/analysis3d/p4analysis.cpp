@@ -1024,6 +1024,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
 
     Force.set( 0.0, 0.0, 0.0);
     Moment.set(0.0, 0.0, 0.0);
+    m_MomentFF.set(0.0, 0.0, 0.0);
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
 
@@ -1072,6 +1073,22 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
                 stripforce *= GammaStrip;      // N/rho
 
                 Force += stripforce;
+
+                // the strip's far-field force for the moment sum: the Kutta-Joukowski lift plus the
+                // Trefftz-plane force, evaluated at the mid-wake point as in trefftzDrag;
+                // the trailing-point velocity used for the force above is left out: the wake-induced
+                // velocity is not force-free under a lateral perturbation (issue #7)
+                if(m_bFarFieldMoment)
+                {
+                    Vector3d WgFF;
+                    Panel4 const *p4w = m_WakePanel4.data() + p4.iWake();
+                    getVelocityVector(midWakePoint(p4w), Mu4, Sigma4, WgFF, Vortex::coreRadius(), true, false);
+                    WgFF *= 0.5;
+                    WgFF += VInf.at(i4);
+                    stripforce  = WgFF * vortex;
+                    stripforce *= GammaStrip;      // N/rho
+                    m_MomentFF += (stripQuarterPoint(p4) - CoG) * stripforce;   // N.m/rho
+                }
 
 //                m++;
             }
@@ -1150,6 +1167,8 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
             PanelLeverArm = ForcePt - CoG;
         }
         Moment += PanelLeverArm * PanelForce ;                     // N.m/rho
+        // the far-field strip forces only cover the wings: the fuse keeps its on-body pressure moment
+        if(m_bFarFieldMoment && p4.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce;  // N.m/rho
     }
 
     if(m_pPolar3d->isViscous())
@@ -1160,6 +1179,8 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
 
     Force  *= m_pPolar3d->density();                          // N
     Moment *= m_pPolar3d->density();                          // N.m
+    if(m_pPolar3d->isVLM()) m_MomentFF = Moment;              // the on-body moment is vortex-based for VLM: keep it
+    else                    m_MomentFF *= m_pPolar3d->density(); // N.m
 }
 
 
@@ -1927,6 +1948,32 @@ int P4Analysis::nextTopTrailingPanelIndex(Panel4 const &p4) const
     while (index>=0); //  = while(true)
 
     return -1;
+}
+
+
+/**
+ * Returns an estimate of the strip's quarter-chord point, used as the application point
+ * of the strip's far-field force when summing moments.
+ * Walks the strip upstream from the trailing panel via the iPU panel links;
+ * for thick surfaces the walk stops at the leading edge i.e. where the chain reaches the top surface.
+ */
+Vector3d P4Analysis::stripQuarterPoint(Panel4 const &p4) const
+{
+    Vector3d ptTE = (p4.TA() + p4.TB()) * 0.5;
+
+    Vector3d ptLE = ptTE;
+    int index = p4.index();
+    do
+    {
+        Panel4 const &p4k = m_Panel4.at(index);
+        if(p4k.isTopPanel()) break;
+        ptLE = (p4k.LA() + p4k.LB()) * 0.5;
+        if(p4k.m_iPU>=0) index = p4k.m_iPU;
+        else             break;
+    }
+    while (index>=0); //  = while(true)
+
+    return ptLE + (ptTE-ptLE)*0.25;
 }
 
 

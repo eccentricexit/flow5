@@ -118,6 +118,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         double computeCm(const Vector3d &CoG, double Alpha, bool bFuseMi);
         double stripArea(const Panel3 &p3, bool bThinSurfaces) const;
         int nextTopTrailingPanelIndex(const Panel3 &p3) const;
+        Vector3d stripQuarterPoint(Panel3 const &p3) const;
 
         void midWakePoint(const Panel3 *pWakePanel, Vector3d &midleft, Vector3d &midright) const;
         void trailingWakePoint(const Panel3 *pWakePanel, Vector3d &left, Vector3d &right) const;
