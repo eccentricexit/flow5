@@ -577,9 +577,7 @@ double P3Analysis::stripArea(Panel3 const &p3, bool bThinSurfaces) const
  * The leading edge point is the midpoint of the strip's leading edge, found by walking the strip
  * upstream from the trailing panel via the iPU panel links;
  * for thick surfaces the walk stops at the leading edge i.e. where the chain reaches the top surface.
- * The last triangle of the walk is the upper triangle of the leading cell, see Surface::makeTriPanels():
- * its nodes are (LA, TA, LB) or (TB, LB, LA) for a thin left or right surface,
- * and (LA, LB, TA) or (LA, LB, TB) for the bottom of a thick surface.
+ * The last triangle of the walk is the upper triangle of the leading cell, see Panel3::leadingEdgeMidpoint().
  */
 Vector3d P3Analysis::stripQuarterPoint(Panel3 const &p3) const
 {
@@ -594,13 +592,7 @@ Vector3d P3Analysis::stripQuarterPoint(Panel3 const &p3) const
         pLast = &p3k;
     }
 
-    int iA=0, iB=1; // the indexes of the leading nodes in the last triangle
-    if(p3.isMidPanel())
-    {
-        if(pLast->isLeftWingPanel()) {iA=0; iB=2;}
-        else                         {iA=1; iB=2;}
-    }
-    Vector3d ptLE = (pLast->vertexAt(iA) + pLast->vertexAt(iB)) * 0.5;
+    Vector3d ptLE = pLast->leadingEdgeMidpoint();
 
     return ptLE + (ptTE-ptLE)*0.25;
 }
@@ -840,6 +832,8 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 
 //    clearDebugPts();
 
+    if(SpanResFF.m_FInduced.size()!=SpanResFF.m_F.size()) SpanResFF.m_FInduced.assign(SpanResFF.m_F.size(), Vector3d());
+
     // Note: parallelization fails, incompatibility with std::vectors of SpanDistribs
     int m=0;
     for(int i3=0; i3<nPanel3; i3++)
@@ -892,6 +886,7 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 
             StripForce *= m_pPolar3d->density() / qDyn;      // N/q
             ForceBodyAxes += StripForce;                     // N/q
+            SpanResFF.m_FInduced[m] = StripForce * qDyn;     // N, body axes
 
             SpanResFF.m_Vd[m]  = Wg_m;
             SpanResFF.m_Ai[m]  = atan2(Wg_m.dot(surfacenormal), QInf)*180.0/PI;
@@ -909,6 +904,13 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 * Calculates the forces using a far-field method.
 * Calculates the moments by a near field method, i.e. direct summation on the panels.
 * The downwash is evaluated far downstream (i.e. where the inluence of the bounded vortices is negligible)
+*
+* On thin surfaces the panel force is normal to the mean surface, so the panel pressures carry no leading-edge suction,
+* and the load near the leading edge is under-integrated; the far-field force carries both. Strip by strip, the difference
+* between the far-field force (the Kutta-Joukowski force with the local velocity plus the Trefftz-plane force) and the sum of the
+* strip's panel forces is a force that belongs at the strip's leading edge: its moment is added to the on-body moment.
+* Then the moment and the force agree in what they include, and the neutral point does not depend on the CG.
+* Thick surfaces need no correction: their pressures carry the suction.
 */
 void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, double beta, Vector3d const &CoG, bool bFuseMi,
                         std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment)
@@ -930,6 +932,11 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     m_MomentFF.set(0.0, 0.0, 0.0);
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
+
+    // the thin strips' far-field forces (N), their leading edge points, the sums of their panel forces (N/rho),
+    // and the strip that each panel belongs to (-1 for none: thick surfaces, fuselage)
+    std::vector<Vector3d> stripFF, stripLE, stripFP;
+    std::vector<int> stripOfPanel(nPanels(), -1);
 
 //    int m=0;
 
@@ -965,7 +972,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 // Trefftz-plane force, evaluated at the mid-wake point as in trefftzDrag;
                 // the trailing-point velocity used for the force above is left out: the wake-induced
                 // velocity is not force-free under a lateral perturbation (issue #7)
-                if(m_bFarFieldMoment)
+                // The thin strips need it too: their leading-edge force is the difference of this force and the panel forces
                 {
                     Vector3d WgFF;
                     midWakePoint(p3W, left, right);
@@ -975,7 +982,20 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                     WgFF += VInf.at(i3);
                     stripforce  =  WgFF * vortex;
                     stripforce *= GammaStrip * m_pPolar3d->density();     // N
-                    m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
+                    if(m_bFarFieldMoment) m_MomentFF += (stripQuarterPoint(p3) - CoG) * stripforce;   // N.m
+
+                    // walk the strip upstream, to its leading edge
+                    int iStrip = int(stripFF.size());
+                    Panel3 const *pLast = &p3;
+                    stripOfPanel[i3] = iStrip;
+                    while(pLast->m_iPU>=0)
+                    {
+                        stripOfPanel[pLast->m_iPU] = iStrip;
+                        pLast = &m_Panel3.at(pLast->m_iPU);
+                    }
+                    stripFF.push_back(stripforce);
+                    stripLE.push_back(pLast->leadingEdgeMidpoint());
+                    stripFP.push_back(Vector3d());
                 }
 
  //               m++;
@@ -1042,6 +1062,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             PanelForce = p3.normal() * (-Cp) * p3.area() *1/2.*QInf*QInf;      // Newtons/rho
             PanelLeverArm = p3.CoG() - CoG;
             Moment += PanelLeverArm * PanelForce;                     // N.m/rho
+            if(stripOfPanel[i3]>=0) stripFP[stripOfPanel[i3]] += PanelForce;   // N/rho
             // the far-field strip forces only cover the wings: the fuse keeps its on-body pressure moment
             if(m_bFarFieldMoment && p3.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce * m_pPolar3d->density();  // N.m
         }
@@ -1066,6 +1087,10 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     Force += WindDirection*frictiondrag;
 */
     Moment *= m_pPolar3d->density();                          // N.m
+
+    // the leading-edge force of the thin strips: what the far field carries and the panel forces do not
+    for(unsigned int is=0; is<stripFF.size(); is++)
+        Moment += (stripLE[is] - CoG) * (stripFF[is] - stripFP[is] * m_pPolar3d->density());   // N.m
 }
 
 
@@ -1136,56 +1161,31 @@ void P3Analysis::moments(double *Mu3, double alpha, double beta, Vector3d CoG,
 /**
  * Returns the geometric pitching moment coefficient for the specified angle of attack
  * The effect of the viscous drag is not included.
+ * This is the moment of forces(), i.e. with the leading-edge force of the thin surfaces, so that the equilibrium angle
+ * is the one where the operating point's Cm is zero.
  * @param Alpha the aoa for which Cm is calculated
  */
 double P3Analysis::computeCm(Vector3d const &CoG, double Alpha, bool bFuseMi)
 {
-    Vector3d PanelLeverArm, ForcePt, PanelForce, WindDirection;
-    double Cp=0;
-
     // Define the wind axis
     double beta=0;
     double cosa = cos(Alpha*PI/180.0);
     double sina = sin(Alpha*PI/180.0);
-    WindDirection.set(cosa, 0.0, sina);
+    Vector3d WindDirection(cosa, 0.0, sina);
 
     std::vector<Vector3d> VLocal(nPanels()*3);
     std::vector<Vector3d> VInf(nPanels(), WindDirection);
     combineLocalVelocities(Alpha, beta, VLocal);
     computeOnBodyCp(VInf, VLocal, m_Cp);
 
-    bool bTrace = false;
-    double Cm = 0.0;
-    for(int i3=0; i3<nPanels(); i3++)
-    {
-        Panel3 const &p3 = m_Panel3.at(i3);
+    // forces() needs the doublet and source strengths for this angle
+    makeSourceStrengths(WindDirection);
+    makeUnitDoubletStrengths(Alpha, beta);
 
-        if(!p3.isFusePanel() || bFuseMi)
-        {
+    Vector3d Force, Moment;
+    forces(m_Mu.data(), m_Sigma.data(), Alpha, beta, CoG, bFuseMi, VInf, Force, Moment);
 
-    /*        //first calculate Cp for this angle
-            p3.globalToLocal(VInf, VLocal);
-            VLocal += m_uVlNode.at(3*i3)*cosa + m_wVlNode.at(3*i3)*sina;
-            Speed2 = VLocal.x*VLocal.x + VLocal.y*VLocal.y;// + VLocal.z*VLocal.z;
-            Cp  = 1.0-Speed2; // QInf=unit, /1.0/1.0;
-    */
-            Cp = (m_Cp.at(3*i3)+m_Cp.at(3*i3+1)+m_Cp.at(3*i3+2))/3.0;
-
-            //next calculate the force acting on the panel
-            ForcePt = p3.CoG();
-            PanelForce = p3.normal() * (-Cp) * p3.area();      // Newtons/q
-if(bTrace) std::cout << std::format("  {:3d}  {:13g}  {:13g}  {:13g}  {:13g}  {:13g}  {:13g}",
-                  i3, ForcePt.x, ForcePt.y, ForcePt.z, PanelForce.x, PanelForce.y, PanelForce.z)<<std::endl;
-
-            PanelLeverArm.x = ForcePt.x - CoG.x;
-            PanelLeverArm.y = ForcePt.y - CoG.y;
-            PanelLeverArm.z = ForcePt.z - CoG.z;
-            Cm += -PanelLeverArm.x * PanelForce.z + PanelLeverArm.z*PanelForce.x; //N.m/rho
-        }
-    }
-
-    Cm *= m_pPolar3d->density();
-    return Cm;
+    return 2.0 * Moment.y;      // forces() has the dynamic pressure of a unit speed, N.m
 }
 
 
