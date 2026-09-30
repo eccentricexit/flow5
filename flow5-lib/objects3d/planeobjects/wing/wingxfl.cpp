@@ -1974,6 +1974,25 @@ int WingXfl::nearestStrip(SpanDistribs const &SpanRes, Vector3d const &pt) const
 }
 
 
+/**
+ * The moment about the CoG of the leading-edge force of the thin strips: on each strip, the far-field force
+ * (SpanDistribs::m_F + m_FInduced) minus the sum of the panel forces (m_FPressure), applied at the strip's leading edge.
+ * The panel forces of a thin surface are normal to the mean surface, and carry no leading-edge suction;
+ * see P3Analysis::forces(), which does the same for the stability derivatives.
+ * The span distribution must have been completed by the induced forces, the Trefftz-plane forces and panel3ComputeStrips().
+ * @return the moment in N.m, in body axes
+ */
+Vector3d WingXfl::leadingEdgeMoment(SpanDistribs const &SpanRes, Vector3d const &CoG) const
+{
+    Vector3d M;
+    int const n = int(SpanRes.m_PtLE.size());
+    if(int(SpanRes.m_F.size())<n || int(SpanRes.m_FInduced.size())<n || int(SpanRes.m_FPressure.size())<n) return M;
+    for(int m=0; m<n; m++)
+        M += (SpanRes.m_PtLE.at(m) - CoG) * (SpanRes.m_F.at(m) + SpanRes.m_FInduced.at(m) - SpanRes.m_FPressure.at(m));
+    return M;
+}
+
+
 void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePolar const*pWPolar, Vector3d const &CoG,
                                   double alpha, double beta, double QInf, double const*Cp3Vtx,
                                   SpanDistribs &SpanResSum)
@@ -1999,6 +2018,7 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
 
     double const qDyn = 0.5*pWPolar->density()*QInf*QInf;
     SpanResSum.m_FPressure.resize(m_NStation);
+    SpanResSum.m_PtLE.resize(m_NStation);
     Vector3d StripPressureForce; // as in panel3ComputeInviscidForces, so that the strips and the tip patches sum to Fsum
 
     int iStrip = 0;
@@ -2038,10 +2058,12 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
 
                 leverArmC4CoG = PtC4Strip - CoG;
 
+                Panel3 const *pLastPanel = nullptr; // the leading panel of the strip
                 do
                 {
                     idx =  surf.m_Panel3List.at(i3);
                     Panel3 const &p3strip = panel3list.at(idx);
+                    pLastPanel = &p3strip;
 
                     ForcePt = p3strip.CoG();
                     double CpAverage = (Cp3Vtx[3*idx]+Cp3Vtx[3*idx+1]+Cp3Vtx[3*idx+2])/3.0;
@@ -2090,6 +2112,7 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
                 SpanResSum.m_CmC4[iStrip] *= 1.0  /SpanResSum.m_Chord.at(iStrip)/SpanResSum.m_StripArea.at(iStrip);
                 SpanResSum.m_CmPressure[iStrip] = stripmoment.dot(WindSide)/SpanResSum.m_Chord.at(iStrip)/SpanResSum.m_StripArea.at(iStrip);
                 SpanResSum.m_FPressure[iStrip] = StripPressureForce * qDyn;         // N, body axes
+                if(pLastPanel->isMidPanel()) SpanResSum.m_PtLE[iStrip] = pLastPanel->leadingEdgeMidpoint();  // thin surfaces only
 
                 // strip sum results
 //                double wdforce = StripForce.dot(WindDirection);                          // Newtons/q

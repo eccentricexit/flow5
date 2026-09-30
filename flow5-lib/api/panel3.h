@@ -170,6 +170,7 @@ class FL5LIB_EXPORT Panel3 : public Panel
         Node const &rightTrailingNode() const override;
         inline Vector3d trailingVortex() const override;
         inline Vector3d midTrailingPoint() const override;
+        inline Vector3d leadingEdgeMidpoint() const;
 
         Segment3d const &edge(int i) const {return m_Edge[i];}
         double qualityFactor(double &r, double &shortestEdge) const;
@@ -427,6 +428,24 @@ inline Vector3d Panel3::midTrailingPoint() const
         else                   return (m_S[1]+m_S[0])/2.0;
     }
     else return Vector3d();
+}
+
+
+/**
+ * The midpoint of the leading edge of the strip this panel ends: to be called on the last panel of a strip walked upstream
+ * from its trailing panel via the iPU links, see Surface::makeTriPanels().
+ * That triangle is the upper triangle of the leading cell, with nodes (LA, TA, LB) or (TB, LB, LA) for a mid-surface
+ * left or right panel, and (LA, LB, TA) or (LA, LB, TB) for the bottom of a thick surface.
+ */
+inline Vector3d Panel3::leadingEdgeMidpoint() const
+{
+    int iA=0, iB=1; // the indexes of the leading nodes
+    if(isMidPanel())
+    {
+        if(isLeftWingPanel()) {iA=0; iB=2;}
+        else                  {iA=1; iB=2;}
+    }
+    return (vertexAt(iA) + vertexAt(iB)) * 0.5;
 }
 
 
