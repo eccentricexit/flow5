@@ -66,6 +66,7 @@ PanelAnalysis::PanelAnalysis()
     m_bMatrixError = false;
     m_bSequence    = false;
     m_bWarning     = false;
+    m_bFarFieldMoment = false;
 
     m_nBlocks     = s_MaxThreads;
 
@@ -811,6 +812,7 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     // y-derivatives________________________
 //    alpha = atan2(Vjm.z, Vjm.x)*180.0/PI;// =alphaeq....
     alpha = alphaeq;
+    m_bFarFieldMoment = true; // Lv and Nv are the only users of the far-field moment
     if(m_pPolar3d->isQuadMethod())
     {
         mup = m_VpRHS.data();
@@ -845,6 +847,7 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         forces(mum, Sigma.data()+4*N, alpha, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
         MomentFFm = m_MomentFF;
     }
+    m_bFarFieldMoment = false;
     SD.Yv = (Forcem - Forcep).dot(js)   /deltaspeed/2.0;
     // the on-body pressure moment picks up a spurious response to lateral perturbations (cf. issue #7):
     // the roll and yaw derivatives are based on the moment of the far-field strip forces instead
