@@ -1075,16 +1075,20 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
                 Force += stripforce;
 
                 // the strip's far-field force for the moment sum: the Kutta-Joukowski lift plus the
-                // Trefftz-plane force, evaluated as in trefftzDrag; the wake-induced velocity used for
-                // the force above is left out: it is not force-free under a lateral perturbation (issue #7)
-                Vector3d WgFF;
-                Panel4 const *p4w = m_WakePanel4.data() + p4.iWake();
-                getVelocityVector(midWakePoint(p4w), Mu4, Sigma4, WgFF, Vortex::coreRadius(), true, false);
-                WgFF *= 0.5;
-                WgFF += VInf.at(i4);
-                stripforce  = WgFF * vortex;
-                stripforce *= GammaStrip;      // N/rho
-                m_MomentFF += (stripQuarterPoint(p4) - CoG) * stripforce;   // N.m/rho
+                // Trefftz-plane force, evaluated at the mid-wake point as in trefftzDrag;
+                // the trailing-point velocity used for the force above is left out: the wake-induced
+                // velocity is not force-free under a lateral perturbation (issue #7)
+                if(m_bFarFieldMoment)
+                {
+                    Vector3d WgFF;
+                    Panel4 const *p4w = m_WakePanel4.data() + p4.iWake();
+                    getVelocityVector(midWakePoint(p4w), Mu4, Sigma4, WgFF, Vortex::coreRadius(), true, false);
+                    WgFF *= 0.5;
+                    WgFF += VInf.at(i4);
+                    stripforce  = WgFF * vortex;
+                    stripforce *= GammaStrip;      // N/rho
+                    m_MomentFF += (stripQuarterPoint(p4) - CoG) * stripforce;   // N.m/rho
+                }
 
 //                m++;
             }
@@ -1163,6 +1167,8 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
             PanelLeverArm = ForcePt - CoG;
         }
         Moment += PanelLeverArm * PanelForce ;                     // N.m/rho
+        // the far-field strip forces only cover the wings: the fuse keeps its on-body pressure moment
+        if(m_bFarFieldMoment && p4.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce;  // N.m/rho
     }
 
     if(m_pPolar3d->isViscous())
