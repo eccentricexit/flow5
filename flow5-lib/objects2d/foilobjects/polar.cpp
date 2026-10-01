@@ -22,6 +22,7 @@
 
 *****************************************************************************/
 
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <format>
@@ -548,58 +549,166 @@ void Polar::getClLimits(double &Clmin, double &Clmax) const
 }
 
 /**
-* Returns the moment coefficient at zero-lift.
-* Cm0 is interpolated between the two points in the array such that Cl[i]<0 and Cl[i+1]>0.
-* If no such pair is found, the method returns 0.
+* The point of the polar where the lift rises most steadily over +-window degrees:
+* the median of the slopes between consecutive points in the window, which one jump of branch does not move.
+*/
+static int attachedAnchor(std::vector<double> const &alpha, std::vector<double> const &cl, double window)
+{
+    int n = int(alpha.size());
+    int best = 0;
+    for(int i=1; i<n; i++) if(fabs(cl.at(i))<fabs(cl.at(best))) best = i;
+    double bestSlope = -LARGEVALUE;
+    for(int i=0; i<n; i++)
+    {
+        std::vector<double> slopes;
+        for(int k=0; k+1<n; k++)
+        {
+            if(fabs(0.5*(alpha.at(k)+alpha.at(k+1))-alpha.at(i))<=window+1.0e-9)
+                slopes.push_back((cl.at(k+1)-cl.at(k))/(alpha.at(k+1)-alpha.at(k)));
+        }
+        if(slopes.size()<3) continue;
+        std::sort(slopes.begin(), slopes.end());
+        size_t m = slopes.size();
+        double median = (m%2) ? slopes.at(m/2) : 0.5*(slopes.at(m/2-1)+slopes.at(m/2));
+        if(median>bestSlope)
+        {
+            best = i;
+            bestSlope = median;
+        }
+    }
+    return best;
+}
+
+
+/**
+* Walking from the anchor (dir=1: up in alpha, towards the Cl max; -1: down, towards the Cl min), returns the first point
+* whose Cl is the extreme of all the points within +-window degrees and at least that of the next point along the walk.
+* Returns the last point of the walk if there is none.
+*/
+static int stallIndex(std::vector<double> const &alpha, std::vector<double> const &cl, int anchor, int dir, double window)
+{
+    int n = int(alpha.size());
+    double sign = dir>0 ? 1.0 : -1.0;
+    for(int i=anchor; i>=0 && i<n; i+=dir)
+    {
+        bool bExtreme = true;
+        for(int k=0; k<n && bExtreme; k++)
+            if(fabs(alpha.at(k)-alpha.at(i))<=window+1.0e-9 && sign*cl.at(k)>sign*cl.at(i)) bExtreme = false;
+        int next = i + dir;
+        if(bExtreme && (next<0 || next>=n || sign*cl.at(i)>=sign*cl.at(next))) return i;
+    }
+    return dir>0 ? n-1 : 0;
+}
+
+
+/**
+* Returns the indices of the first and last points of the attached branch of the polar, from the negative to the positive stall.
+* The branch is walked from the point where the lift rises most steadily, up in alpha to the first point that is the Cl maximum
+* of all the points within +-3 degrees, and down to the first such minimum. Crossings of Cl=0 outside it, on the post-stall branches,
+* do not count. The points are assumed to be sorted by increasing alpha.
+*/
+void Polar::getAttachedBranch(int &first, int &last) const
+{
+    first = last = 0;
+    if(m_Alpha.size()<2 || m_Cl.size()!=m_Alpha.size()) return;
+    int anchor = attachedAnchor(m_Alpha, m_Cl, 3.0);
+    first = stallIndex(m_Alpha, m_Cl, anchor, -1, 3.0);
+    last  = stallIndex(m_Alpha, m_Cl, anchor,  1, 3.0);
+}
+
+
+/**
+* Finds the zero-lift angle and the moment coefficient at zero lift on the attached branch of the polar.
+* They are interpolated between the two consecutive points that bracket Cl=0. If the branch crosses zero more than once, as the
+* thin symmetric foils do in the reversed-lift dead band at low Reynolds numbers, they are taken from a least-squares line over the
+* points that span the crossings, widened until the line rises, and the number of crossings is reported.
+* @param zl the result: the angle in degrees, Cm, the number of crossings, and the angles of the points that bracket the crossings
+* @return false if the attached branch does not cross Cl=0, in which case zl is unchanged
+*/
+bool Polar::getZeroLift(ZeroLift &zl) const
+{
+    int n = int(m_Alpha.size());
+    if(n<2 || int(m_Cl.size())!=n || int(m_Cm.size())!=n) return false;
+
+    int lo(0), hi(0);
+    getAttachedBranch(lo, hi);
+
+    std::vector<int> seg; // k such that Cl changes sign between the points k and k+1
+    for(int k=lo; k<hi; k++)
+        if((m_Cl.at(k)<0.0) != (m_Cl.at(k+1)<0.0)) seg.push_back(k);
+    if(seg.empty()) return false;
+
+    int k0 = seg.front();
+    int k1 = seg.back()+1;
+    ZeroLift res;
+    res.nCrossings = int(seg.size());
+    res.alphaFrom = m_Alpha.at(k0);
+    res.alphaTo   = m_Alpha.at(k1);
+    if(seg.size()==1)
+    {
+        double t = -m_Cl.at(k0)/(m_Cl.at(k0+1)-m_Cl.at(k0));
+        res.alpha = m_Alpha.at(k0) + t*(m_Alpha.at(k0+1)-m_Alpha.at(k0));
+        res.cm    = m_Cm.at(k0)    + t*(m_Cm.at(k0+1)   -m_Cm.at(k0));
+    }
+    else
+    {
+        // inside a reversed-lift band the slope is negative, so widen by one point on each side, within the branch, until the line rises
+        for(int f0=k0, f1=k1; ; f0=std::max(lo, f0-1), f1=std::min(hi, f1+1))
+        {
+            double sx(0), sy(0), sxx(0), sxy(0), N = double(f1-f0+1);
+            for(int k=f0; k<=f1; k++)
+            {
+                sx  += m_Alpha.at(k);
+                sy  += m_Cl.at(k);
+                sxx += m_Alpha.at(k)*m_Alpha.at(k);
+                sxy += m_Alpha.at(k)*m_Cl.at(k);
+            }
+            double den = N*sxx - sx*sx;
+            double slope = den>0.0 ? (N*sxy-sx*sy)/den : -1.0;
+            if(slope>0.0)
+            {
+                res.alpha = -(sy-slope*sx)/N/slope;
+                for(int k=f0; k<f1; k++)
+                {
+                    if(m_Alpha.at(k)<=res.alpha && res.alpha<=m_Alpha.at(k+1))
+                    {
+                        res.cm = m_Cm.at(k) + (res.alpha-m_Alpha.at(k))/(m_Alpha.at(k+1)-m_Alpha.at(k)) * (m_Cm.at(k+1)-m_Cm.at(k));
+                        break;
+                    }
+                }
+                break;
+            }
+            if(f0==lo && f1==hi) return false;
+        }
+    }
+    zl = res;
+    return true;
+}
+
+
+/**
+* Returns the moment coefficient at zero-lift, interpolated on the attached branch of the polar, see getZeroLift().
+* If the attached branch does not reach zero lift, the method returns 0.
 *@return Cm0
 */
 double Polar::getCm0() const
 {
-    double Clmin =  1000.0;
-    double Clmax = -1000.0;
-    for (unsigned int i=0; i<m_Cl.size(); i++)
-    {
-        Clmin = std::min(Clmin, m_Cl.at(i));
-        Clmax = std::max(Clmax, m_Cl.at(i));
-    }
-    if(!(Clmin<0.0) || !(Clmax>0.0)) return 0.0;
-    unsigned int k=0;
-//    double rr  = m_Cl.at(k);
-//    double rr1 = m_Cl.at(k+1);
-
-    while (m_Cl.at(k+1)<0.0)
-    {
-//        rr  = m_Cl.at(k);
-//        rr1 = m_Cl.at(k+1);
-        k++;
-    }
-    if(k+1>=m_Cm.size()) return 0.0;
-    double Cm0 = m_Cm.at(k) + (m_Cm.at(k+1)-m_Cm.at(k))*(0.0-m_Cl.at(k))/(m_Cl.at(k+1)-m_Cl.at(k));
-    return Cm0;
+    ZeroLift zl;
+    if(!getZeroLift(zl)) return 0.0;
+    return zl.cm;
 }
 
 
+/**
+* Returns the zero-lift angle in degrees, interpolated on the attached branch of the polar, see getZeroLift().
+* If the attached branch does not reach zero lift, the method returns 0.
+*@return the zero-lift angle
+*/
 double Polar::getZeroLiftAngle() const
 {
-    double Clmin =  1000.0;
-    double Clmax = -1000.0;
-    for (unsigned int i=0; i<m_Cl.size(); i++)
-    {
-        Clmin = std::min(Clmin, m_Cl.at(i));
-        Clmax = std::max(Clmax, m_Cl.at(i));
-    }
-    if(!(Clmin<0.0) || !(Clmax>0.0)) return 0.0;
-
-    unsigned int k=0;
-
-    while (m_Cl.at(k)<0.0)
-    {
-        if(k+1>=m_Cl.size()) return 0.0; // error
-        k++;
-    }
-    if(k+1>=m_Alpha.size()) return 0.0;
-    double Alpha0 = m_Alpha.at(k) + (m_Alpha.at(k+1)-m_Alpha.at(k))*(0.0-m_Cl.at(k))/(m_Cl.at(k+1)-m_Cl.at(k));
-    return Alpha0;
+    ZeroLift zl;
+    if(!getZeroLift(zl)) return 0.0;
+    return zl.alpha;
 }
 
 

@@ -56,6 +56,7 @@ bool foil::readFoilFile(const std::string &filename, Foil *pFoil, int &iLineErro
     FoilName = filename;
 
     float val[] {0,0,0};
+    int iCountLine(0);       // the line of the first pair, if it is a pair of point counts (Lednicer format)
 
     // identify and read the first non-empty line
     while (std::getline(file, line))
@@ -86,6 +87,9 @@ bool foil::readFoilFile(const std::string &filename, Foil *pFoil, int &iLineErro
 
         if(xfl::readValues(line, val, 2)==2)
         {
+            // Lednicer format: the counts of the upper and lower points, then the surfaces from the leading edge
+            if(basenodes.empty() && iCountLine==0 && val[0]>1.5f && val[1]>1.5f && val[0]==floorf(val[0]) && val[1]==floorf(val[1]))
+                iCountLine = iLine;
             basenodes.push_back({val[0], val[1]});
         }
         else
@@ -95,6 +99,14 @@ bool foil::readFoilFile(const std::string &filename, Foil *pFoil, int &iLineErro
             iLineError = iLine;
 //            return false;
         }
+    }
+
+    // Only the Selig format is read: the counts of a Lednicer file would be taken for the first point,
+    // and the foil would be garbage that fails later without a message
+    if(iCountLine>0 && int(basenodes.size())==int(basenodes.front().x)+int(basenodes.front().y)+1)
+    {
+        iLineError = iCountLine;
+        return false;
     }
 
     pFoil->setName(FoilName);

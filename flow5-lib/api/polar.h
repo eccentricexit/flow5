@@ -77,6 +77,18 @@ class FL5LIB_EXPORT Polar : public XflObject
         void insertPoint(int i);
         void removePoint(int i);
 
+        /** The zero-lift angle and Cm at zero lift on the attached branch, see getZeroLift() */
+        struct ZeroLift
+        {
+            double alpha = 0.0;      /**< in degrees */
+            double cm = 0.0;
+            int nCrossings = 0;      /**< the number of times the attached branch crosses Cl=0 */
+            double alphaFrom = 0.0;  /**< the angles of the first and last points that bracket the crossings, in degrees */
+            double alphaTo = 0.0;
+        };
+
+        bool getZeroLift(ZeroLift &zl) const;
+        void getAttachedBranch(int &first, int &last) const;
         double getCm0() const;
         double getZeroLiftAngle() const;
         void getStallAngles(double &negative, double &positive) const;
