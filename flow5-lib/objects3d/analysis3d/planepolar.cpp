@@ -848,8 +848,16 @@ void PlanePolar::setFlapCtrlsName(std::string name)
 }
 
 
+/**
+* Checks that the flap controls of the polar match the flaps of the plane, wing by wing.
+* When they do not, the controls are padded with zeros or cut when the task starts, see resizeFlapCtrls(); the log names the
+* non-zero deflections that are cut, which are then not applied.
+* @param log the description of what does not match, empty if the controls match
+* @return true if there is one set of controls per wing and each has the number of flaps of the wing
+*/
 bool PlanePolar::checkFlaps(PlaneXfl const*pPlaneXfl, std::string &logmsg) const
 {
+    logmsg.clear();
     if(!pPlaneXfl) return false;
 
     std::string log;
@@ -859,21 +867,26 @@ bool PlanePolar::checkFlaps(PlaneXfl const*pPlaneXfl, std::string &logmsg) const
     {
         log = std::format("The number of flap controls sets is {:d} "
                           "and the plane's number of wings is {:d}\n", nFlapCtrls(), pPlaneXfl->nWings());
-        return false;
+        bMatch = false;
     }
 
-    if(bMatch)
+    for(int ic=0; ic<nFlapCtrls(); ic++)
     {
-        for(int ic=0; ic<nFlapCtrls(); ic++)
+        int nFlaps = ic<pPlaneXfl->nWings() ? pPlaneXfl->wingAt(ic)->nFlaps() : 0;
+        if(flapCtrls(ic).nValues() == nFlaps) continue;
+
+        std::string strange = std::format("The number of flap controls for wing {:d} "
+                                          "does not match the wing's number of flaps\n", ic+1);
+        log += strange;
+        bMatch = false;
+
+        std::string cut;
+        for(int k=nFlaps; k<flapCtrls(ic).nValues(); k++)
         {
-            if(flapCtrls(ic).nValues() != pPlaneXfl->wingAt(ic)->nFlaps())
-            {
-                std::string strange = std::format("The number of flap controls for wing {:d} "
-                                              "does not match the wing's number of flaps\n", ic+1);
-                log += strange;
-                bMatch = false;
-            }
+            if(flapCtrls(ic).value(k)!=0.0)
+                cut += std::format("{:s}flap {:d} = {:g}", cut.empty() ? "" : ", ", k+1, flapCtrls(ic).value(k));
         }
+        if(cut.length()) log += "   the deflections that the wing has no flap for are ignored: " + cut + "\n";
     }
 
     logmsg = log;

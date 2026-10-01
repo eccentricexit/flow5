@@ -524,7 +524,8 @@ bool PlaneTask::checkWPolarData(Plane const *pPlane, PlanePolar *pWPolar)
         PlaneXfl const *pPlaneXfl = dynamic_cast<PlaneXfl const*>(m_pPlane);
         if(!pWPolar->checkFlaps(pPlaneXfl, str))
         {
-            logmsg += str;
+            // the check passes once the controls are resized: say what was changed, or it goes unsaid
+            traceStdLog(str + "   the flap controls have been resized to the plane's flaps\n");
             pWPolar->resizeFlapCtrls(pPlaneXfl);
         }
 
@@ -2860,7 +2861,8 @@ bool PlaneTask::computeSurfaceDragOTF(Surface const &surf, int iStartStation, do
         if (tau<0.0) tau = 0.0; // redundant
         if (tau>1.0) tau = 1.0; // redundant
 
-        /** @todo what's the use + wrong if flap*/
+        // the zero-lift angle of the stored 2D polars of the strip's foils, interpolated at the strip's Re: it is output only here.
+        // The polars are chosen by foil name and Re only, so neither their flap angle nor the strip's flap deflection is in it, and it is 0 if the polars do not reach zero lift
         spandist.m_Alpha_0[iStation] = Objects2d::getZeroLiftAngle(surf.foilA(), surf.foilB(), spandist.m_Re.at(iStation), tau);
 
         // interpolate
