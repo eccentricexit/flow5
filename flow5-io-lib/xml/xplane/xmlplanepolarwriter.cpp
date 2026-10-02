@@ -140,6 +140,24 @@ void XmlPlanePolarWriter::writeWPolarData(PlanePolar const *pPlPolar)
 
         if(pPlPolar->hasExtraDrag()) writeExtraDrag(pPlPolar->extraDragList());
 
+        if(pPlPolar->bAVLDrag())
+        {
+            writeStartElement("AVLDrag");
+            {
+                writeComment("The parabolic drag spline: CD(CL), added to the polar's drag where the curve is active."
+                             " Point lines are CL, CD control points (the spline stores CD, CL; the swap is here);"
+                             " degree the B-spline's. Needs at least three points.");
+                writeTextElement("Active", "true");
+                writeTextElement("Degree", QString("%1").arg(pPlPolar->AVLSpline().degree()));
+                for(int ic=0; ic<pPlPolar->AVLSpline().nCtrlPoints(); ic++)
+                {
+                    QString strong = QString::asprintf("%g, %g", pPlPolar->AVLSpline().controlPoint(ic).y, pPlPolar->AVLSpline().controlPoint(ic).x);
+                    writeTextElement("Point", strong);
+                }
+            }
+            writeEndElement();
+        }
+
         writeTextElement("Use_plane_inertia",  pPlPolar->bAutoInertia() ? "true" : "false");
 
         writeComment("The inertia fields are used only if Use_plane_inertia is set to false");
