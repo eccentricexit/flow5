@@ -187,6 +187,33 @@ void XmlPlanePolarReader::readWPolar(PlanePolar *pPlPolar, double lengthunit, do
             readExtraDrag(extra, areaunit);
             pPlPolar->setExtraDrag(extra);
         }
+        else if (name().compare(QString("AVLDrag"), Qt::CaseInsensitive)==0)
+        {
+            // the parabolic drag spline, CD(CL); absent from files written before this block existed
+            bool active = false;
+            int degree = 3;
+            std::vector<Node2d> pts;
+            while(!atEnd() && !hasError() && readNextStartElement())
+            {
+                if (name().compare(QString("Active"), Qt::CaseInsensitive)==0)
+                    active = xml::stringToBool(readElementText());
+                else if (name().compare(QString("Degree"), Qt::CaseInsensitive)==0)
+                    degree = readElementText().toInt();
+                else if (name().compare(QString("Point"), Qt::CaseInsensitive)==0)
+                {
+                    // the file lists CL, CD; the spline stores (x=CD, y=CL)
+                    QStringList clcd = readElementText().simplified().split(",");
+                    if(clcd.size()==2) pts.push_back(Node2d(clcd.at(1).toDouble(), clcd.at(0).toDouble()));
+                }
+                else skipCurrentElement();
+            }
+            BSpline spline;
+            spline.setCtrlPoints(pts, 1.0);
+            spline.setDegree(degree);
+            spline.updateSpline();
+            spline.makeCurve();
+            pPlPolar->setAVLDrag(active, spline);
+        }
         else if (name().compare(QString("Use_plane_inertia"), Qt::CaseInsensitive)==0)
         {
             bool bInertia = xml::stringToBool(readElementText());
