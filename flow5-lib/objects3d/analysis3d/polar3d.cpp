@@ -67,7 +67,7 @@ void Polar3d::setDefaults()
     m_VPWMaxLength       = 30.0;  // x MAC
     m_VPWIterations      = 35;
     m_nXWakePanel4    = 5;
-    m_TotalWakeLengthFactor = 30.0;
+    m_TotalWakeLengthFactor = 120.0;
     m_WakePanelFactor = 1.1;
 
     m_AnalysisMethod = xfl::QUADS;
