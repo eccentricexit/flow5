@@ -853,7 +853,7 @@ PlaneOpp* LLTTask::createPlaneOpp(double QInf, double Alpha, bool bWingOut)
 
         m_pWing->surfacePoint(0.25, maindist.m_StripPos[l], xfl::MIDSURFACE, maindist.m_PtC4[l], N);
 
-        if(fabs(m_BendingMoment[l])>fabs(Cb)) Cb = m_BendingMoment[l];
+        if(fabs(m_BendingMoment[ll])>fabs(Cb)) Cb = m_BendingMoment[ll];
     }
     mainwopp.m_MaxBending = Cb;
 
