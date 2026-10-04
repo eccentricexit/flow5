@@ -1984,7 +1984,7 @@ bool PlaneTask::T7Loop()
 
         m_pPA->makeWakePanels(objects::windDirection(0,0), false);
 
-        setLinearSolution();
+        if(!setLinearSolution()) continue;     // the matrix could not be built or factorized: no solution for this control value
 
         traceStdLog("   Making unit panel velocities...");
         m_pPA->makeLocalVelocities(m_pPA->m_uRHS, m_pPA->m_vRHS, m_pPA->m_wRHS, m_pPA->m_uVLocal, m_pPA->m_vVLocal, m_pPA->m_wVLocal, objects::windDirection(0,0));
@@ -2119,7 +2119,7 @@ bool PlaneTask::T123458Loop()
     m_pPA->makeWakePanels(objects::windDirection(0,0), false);
     m_pPA->savePanels();
 
-    setLinearSolution();
+    if(!setLinearSolution()) return false;     // the matrix could not be built or factorized: no operating point can be computed
 
     traceStdLog("   Making unit panel velocities... ");
     int N = int(m_pPA->m_uVLocal.size());
@@ -3173,6 +3173,7 @@ bool PlaneTask::setLinearSolution()
 
     if(m_pPA->m_bMatrixError)
     {
+        traceStdLog("   Numerical error in the influence matrix: a non-finite entry - aborting\n");
         m_bError = true;
         return false;
     }
@@ -3190,7 +3191,13 @@ bool PlaneTask::setLinearSolution()
         strange = std::format("    done in {:.3f} s\n", double(duration)/1000.0);
         traceStdLog(strange);
 
-        if(m_pPA->m_bMatrixError) return false;
+        if(m_pPA->m_bMatrixError)
+        {
+            // the wake's closed-form integrals returned NaN or infinity: the matrix cannot be trusted, and no operating point can be computed from it
+            traceStdLog("   Numerical error in the wake's contribution to the influence matrix: a non-finite entry - aborting\n");
+            m_bError = true;
+            return false;
+        }
     }
     if (isCancelled()) return true;
 
