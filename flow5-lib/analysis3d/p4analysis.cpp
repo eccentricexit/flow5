@@ -1481,7 +1481,7 @@ void P4Analysis::inducedForce(int nPanels, double QInf, double alpha, double bet
  * The Trefttz plane is half-way down the wake panels to avoid end-effects
  */
 void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta, int pos,
-                               Vector3d &FFForce, SpanDistribs &SpanResFF) const
+                               Vector3d &FFForce, SpanDistribs &SpanResFF, bool bTrefftzPlane) const
 {
 //    auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -1504,6 +1504,69 @@ void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta
     double const *Mu4    = m_Mu.data();
     double const *Sigma4 = m_Sigma.data();
 
+    // The Trefftz plane is perpendicular to the wind. The trailing legs of every strip of every surface, projected in it, are point vortices:
+    // the length of the horseshoe legs and the direction of the wake sheet do not enter.
+    std::vector<TrefftzStrip> strips;
+    if(bTrefftzPlane)
+    {
+        for(int index=0; index<this->nPanels(); index++)
+        {
+            Panel4 const &q4 = m_Panel4.at(index);
+            if(!q4.isTrailing()) continue;
+            TrefftzStrip s;
+            s.iPanel = index;
+            if(!m_pPolar3d->isVLM())
+            {
+                if(!(q4.isBotPanel() || q4.isMidPanel())) continue;
+                if(!q4.isMidPanel())
+                {
+                    s.Gamma = -(Mu4[nextTopTrailingPanelIndex(q4)] - Mu4[index]) *4.0*PI;
+                    s.A = q4.TB();  // the vortex is the opposite of trailingVortex()
+                    s.B = q4.TA();
+                }
+                else
+                {
+                    s.Gamma = -Mu4[index] *4.0*PI;
+                    s.A = q4.TA();
+                    s.B = q4.TB();
+                }
+            }
+            else
+            {
+                // the horseshoe legs of the strip's panels coincide: the strip's circulation is the sum of the panels'
+                s.A = q4.m_VA;
+                s.B = q4.m_VB;
+                if(m_pPolar3d->isVLM2())
+                {
+                    s.A = q4.TA();
+                    s.B = q4.TB();
+                    s.Gamma = Mu4[index];
+                }
+                else
+                {
+                    int pp = index;
+                    do
+                    {
+                        s.Gamma += Mu4[pp];
+                        if(m_Panel4.at(pp).isLeading()) break;
+                        pp++;
+                    }
+                    while(pp<this->nPanels());
+                }
+            }
+            strips.push_back(s);
+        }
+        projectTrefftzStrips(winddir, strips);
+    }
+
+    // the velocity at the strip's mid-point, in the plane; half of it is the velocity at the bound vortex
+    auto trefftzWash = [&](Vector3d const &a, Vector3d const &b)
+    {
+        Vector3d pt = (a+b)/2.0;
+        pt -= winddir * pt.dot(winddir);
+        return trefftzVelocity(pt, winddir, strips) * 0.5;
+    };
+
     int m=0;
     for(int i4=0; i4<nPanels; i4++)
     {
@@ -1522,11 +1585,18 @@ void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta
     //                C = (p4.TA() + p4.TB())/2.0;
     //                C += winddir*m_pPolar3d->TrefftzDistance()/2.0;
                     // modified in 7.01 beta 12 to use the mid wake point
-                    C = midWakePoint(p4w);
+                    if(bTrefftzPlane)
+                    {
+                        Wg = trefftzWash(p4.TA(), p4.TB());
+                    }
+                    else
+                    {
+                        C = midWakePoint(p4w);
 
-                    getVelocityVector(C, Mu4, Sigma4, Wg, Vortex::coreRadius(), true, bMultiThreaded);
+                        getVelocityVector(C, Mu4, Sigma4, Wg, Vortex::coreRadius(), true, bMultiThreaded);
     //                getFarFieldVelocity(C, m_Panel4, Mu4, Wg, Vortex::coreRadius());
-                    Wg *= 1.0/2.0;
+                        Wg *= 1.0/2.0;
+                    }
     //                Wg += winddir;
 
                     SpanResFF.m_Vd[m] = Wg;
@@ -1576,12 +1646,19 @@ void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta
                 int pp = i4;
                 SpanResFF.m_Gamma[m] = 0.0;
 
-                getVelocityVector(C, Mu4, Sigma4, Wg, Vortex::coreRadius(), true, bMultiThreaded);
+                if(bTrefftzPlane)
+                {
+                    Wg = trefftzWash(p4.TA(), p4.TB());
+                }
+                else
+                {
+                    getVelocityVector(C, Mu4, Sigma4, Wg, Vortex::coreRadius(), true, bMultiThreaded);
 
-                // The trailing point sees both the upstream and downstream parts of the trailing vortices
-                // Hence it sees twice the downwash.
-                // So divide by 2 to account for this.
-                Wg *= 1.0/2.0;
+                    // The trailing point sees both the upstream and downstream parts of the trailing vortices
+                    // Hence it sees twice the downwash.
+                    // So divide by 2 to account for this.
+                    Wg *= 1.0/2.0;
+                }
                 //                        Wg += winddir;
 
 
@@ -1618,12 +1695,19 @@ void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta
                 assert(p4.isMidPanel());
 
 
-                getVelocityVector(C, Mu4, Sigma4, Wg, Vortex::coreRadius(), true, bMultiThreaded);
+                if(bTrefftzPlane)
+                {
+                    Wg = trefftzWash(p4.m_VA, p4.m_VB);
+                }
+                else
+                {
+                    getVelocityVector(C, Mu4, Sigma4, Wg, Vortex::coreRadius(), true, bMultiThreaded);
 
-                // The trailing point sees both the upstream and downstream parts of the trailing vortices
-                // Hence it sees twice the downwash.
-                // So divide by 2 to account for this.
-                Wg *= 1.0/2.0;
+                    // The trailing point sees both the upstream and downstream parts of the trailing vortices
+                    // Hence it sees twice the downwash.
+                    // So divide by 2 to account for this.
+                    Wg *= 1.0/2.0;
+                }
                 //                        Wg += winddir;
 
                 SpanResFF.m_Vd[m] = Wg;

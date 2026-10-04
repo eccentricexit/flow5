@@ -50,6 +50,16 @@ struct VelBlockData
 };
 
 
+/** A trailing strip as seen in the Trefftz plane: the bound vortex runs from A to B with circulation Gamma (N/rho/V), the trailing legs
+ *  at A and B run along the wind, so that in the plane they are two point vortices of opposite sign. */
+struct TrefftzStrip
+{
+    int iPanel = -1;        /**< the index of the strip's trailing panel */
+    Vector3d A, B;          /**< the ends of the bound vortex; projected in the Trefftz plane by projectTrefftzStrips() */
+    double Gamma = 0.0;
+};
+
+
 class FL5LIB_EXPORT PanelAnalysis
 {
     friend class  Task3d;
@@ -92,7 +102,9 @@ class FL5LIB_EXPORT PanelAnalysis
         virtual bool computeTrimmedConditions(double mass, Vector3d const &CoG, double &alphaeq, double &u0, bool bFuseMi) = 0;
         virtual void forces(double const *Mu, double const *Sigma, double alpha, double beta, Vector3d const &CoG, bool bFuseMi, std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment) = 0;
         virtual void inducedForce(int nPanel3, double QInf, double alpha, double beta, int pos, Vector3d &ForceBodyAxes, SpanDistribs &SpanResFF) const = 0;
-        virtual void trefftzDrag(int nPanel3, double QInf, double alpha, double beta, int pos, Vector3d &Drag, SpanDistribs &SpanResFF) const = 0;
+        /** If bTrefftzPlane, the velocity induced at each strip is evaluated analytically in the Trefftz plane, from the trailing legs of all the surfaces,
+ *  else it is sampled halfway down the finite wake. */
+        virtual void trefftzDrag(int nPanel3, double QInf, double alpha, double beta, int pos, Vector3d &Drag, SpanDistribs &SpanResFF, bool bTrefftzPlane) const = 0;
         virtual int  nPanels() const = 0;
         virtual void makeVertexDoubletDensities(std::vector<double> const &muPanel, std::vector<double> &muNode) const {(void)muPanel; (void)muNode;} //dummy virtual method to enable a call to P3analysis subclass...
 
@@ -109,6 +121,9 @@ class FL5LIB_EXPORT PanelAnalysis
 
         void makeSourceStrengths(Vector3d const &WindDirection);
         void makeSourceStrengths(std::vector<Vector3d> const &WindDirection);
+
+        static void projectTrefftzStrips(Vector3d const &winddir, std::vector<TrefftzStrip> &strips);
+        static Vector3d trefftzVelocity(Vector3d const &pt, Vector3d const &winddir, std::vector<TrefftzStrip> const &strips);
 
         void vortonDrag(double alpha, double beta, double QInf, int n0, int nStations, Vector3d &Drag, SpanDistribs &SpanResFF) const;
 

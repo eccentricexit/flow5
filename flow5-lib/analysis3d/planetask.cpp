@@ -1765,9 +1765,9 @@ void PlaneTask::computeInducedDrag(double alpha, double beta, double QInf)
             else
             {
                 if(m_pPlPolar->isQuadMethod())
-                    m_pP4A->trefftzDrag(pWing->nPanel4(), QInf, alpha, beta, pos, FFForceBodyAxes, m_SpanDistFF[iw]);
+                    m_pP4A->trefftzDrag(pWing->nPanel4(), QInf, alpha, beta, pos, FFForceBodyAxes, m_SpanDistFF[iw], true);
                 else if(m_pPlPolar->isTriangleMethod())
-                    m_pP3A->trefftzDrag(pWing->nPanel3(), QInf, alpha, beta, pos, FFForceBodyAxes, m_SpanDistFF[iw]);
+                    m_pP3A->trefftzDrag(pWing->nPanel3(), QInf, alpha, beta, pos, FFForceBodyAxes, m_SpanDistFF[iw], true);
             }
             m_WingForce[iw] += FFForceBodyAxes;     // N/q, body axes
 
@@ -1783,7 +1783,7 @@ void PlaneTask::computeInducedDrag(double alpha, double beta, double QInf)
         if(m_pPolar3d->bVortonWake())
             m_pPA->vortonDrag(alpha, beta, QInf, 0, m_pPlane->nStations(), FFForceBodyAxes, m_SpanDistFF[0]);
         else
-            m_pP3A->trefftzDrag(m_pPlane->nPanel3(), QInf, alpha, beta, 0, FFForceBodyAxes, m_SpanDistFF[0]);
+            m_pP3A->trefftzDrag(m_pPlane->nPanel3(), QInf, alpha, beta, 0, FFForceBodyAxes, m_SpanDistFF[0], true);
         m_WingForce[0] += FFForceBodyAxes;     // N/q, body axes
     }
 }

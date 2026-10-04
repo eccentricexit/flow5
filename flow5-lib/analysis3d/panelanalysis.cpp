@@ -1353,3 +1353,37 @@ void PanelAnalysis::vortonDrag(double alpha, double beta, double QInf, int n0, i
 }
 
 
+
+
+/**
+ * Projects the ends of the strips' bound vortices on the plane perpendicular to the wind.
+ * The trailing legs run along the wind, so only the position in that plane matters.
+ */
+void PanelAnalysis::projectTrefftzStrips(Vector3d const &winddir, std::vector<TrefftzStrip> &strips)
+{
+    for(TrefftzStrip &s : strips)
+    {
+        s.A -= winddir * s.A.dot(winddir);
+        s.B -= winddir * s.B.dot(winddir);
+    }
+}
+
+
+/**
+ * Returns the velocity at a point of the Trefftz plane (given in the plane) induced by the trailing legs of all the strips.
+ * Each strip is a horseshoe vortex whose legs are infinite lines along the wind: at A, circulation -Gamma along the wind, at B, +Gamma.
+ * This is the velocity far downstream, twice the velocity at the bound vortices. The result is a 3d vector, perpendicular to the wind.
+ * The strips are projected in the plane by projectTrefftzStrips().
+ */
+Vector3d PanelAnalysis::trefftzVelocity(Vector3d const &pt, Vector3d const &winddir, std::vector<TrefftzStrip> const &strips)
+{
+    constexpr double core2 = 1.e-8; // (0.0001 m)^2: the nodes of adjacent strips, or a fin root and a stabiliser, may coincide
+    Vector3d V;
+    for(TrefftzStrip const &s : strips)
+    {
+        Vector3d rA = pt - s.A;
+        Vector3d rB = pt - s.B;
+        V += (winddir*rB) * (s.Gamma/(rB.dot(rB)+core2)) - (winddir*rA) * (s.Gamma/(rA.dot(rA)+core2));
+    }
+    return V * (1.0/(2.0*PI));
+}
