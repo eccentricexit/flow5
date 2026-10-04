@@ -807,6 +807,43 @@ void P3Analysis::inducedForce(int nPanel3, double QInf, double alpha, double bet
 }
 
 
+/**
+ * The trailing strips of every surface of the plane as the point vortices of the Trefftz plane perpendicular to wakedir:
+ * the strip's circulation is the one of the polar's induced force (mid panel, or bottom and top trailing panels on thick surfaces).
+ * Used by trefftzDrag() and by forces(), so that the polar and the derivatives share one far-field velocity.
+ */
+void P3Analysis::makeTrefftzStrips(double const *mu3, Vector3d const &wakedir, std::vector<TrefftzStrip> &strips) const
+{
+    strips.clear();
+    for(int index=0; index<nPanels(); index++)
+    {
+        Panel3 const &p3 = m_Panel3.at(index);
+        if(!p3.isTrailing() || !(p3.isBotPanel() || p3.isMidPanel())) continue;
+
+        double gamma=0;
+        if(p3.isMidPanel())
+        {
+            int idxM = p3.index();
+            gamma = -(mu3[3*idxM+1]+mu3[3*idxM+2])/2.0 *4.0*PI;
+        }
+        else
+        {
+            int idxB = p3.index();
+            int idxU = nextTopTrailingPanelIndex(p3);
+            assert(idxU>=0);
+            gamma = (-(mu3[3*idxU+1]+mu3[3*idxU+2]) + (mu3[3*idxB+1]+mu3[3*idxB+2]))/2.0 *4.0*PI;
+        }
+        TrefftzStrip s;
+        s.iPanel = index;
+        s.A = p3.leftTrailingNode();
+        s.B = p3.rightTrailingNode();
+        s.Gamma = gamma;
+        strips.push_back(s);
+    }
+    projectTrefftzStrips(wakedir, strips);
+}
+
+
 void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta, int pos3,
                              Vector3d &Drag, SpanDistribs &SpanResFF, bool bTrefftzPlane) const
 {
@@ -840,35 +877,7 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
     // The Trefftz plane is perpendicular to the wake sheet (the mesh x axis). The trailing legs of every strip of every surface, projected in it, are point vortices:
     // the finite length of the wake and the direction of the wake sheet do not enter.
     std::vector<TrefftzStrip> strips;
-    if(bTrefftzPlane)
-    {
-        for(int index=0; index<nPanels(); index++)
-        {
-            Panel3 const &p3 = m_Panel3.at(index);
-            if(!p3.isTrailing() || !(p3.isBotPanel() || p3.isMidPanel())) continue;
-
-            double gamma=0;
-            if(p3.isMidPanel())
-            {
-                int idxM = p3.index();
-                gamma = -(mu3[3*idxM+1]+mu3[3*idxM+2])/2.0 *4.0*PI;
-            }
-            else
-            {
-                int idxB = p3.index();
-                int idxU = nextTopTrailingPanelIndex(p3);
-                assert(idxU>=0);
-                gamma = (-(mu3[3*idxU+1]+mu3[3*idxU+2]) + (mu3[3*idxB+1]+mu3[3*idxB+2]))/2.0 *4.0*PI;
-            }
-            TrefftzStrip s;
-            s.iPanel = index;
-            s.A = p3.leftTrailingNode();
-            s.B = p3.rightTrailingNode();
-            s.Gamma = gamma;
-            strips.push_back(s);
-        }
-        projectTrefftzStrips(wakedir, strips);
-    }
+    if(bTrefftzPlane) makeTrefftzStrips(mu3, wakedir, strips);
 
     // Note: parallelization fails, incompatibility with std::vectors of SpanDistribs
     int m=0;
@@ -998,6 +1007,19 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     std::vector<bool> stripThin;
     std::vector<int> stripOfPanel(nPanels(), -1);
 
+    // The far-field velocity of the strips is the one of the polar's induced force (trefftzDrag): the analytic Trefftz plane perpendicular to the wake sheet,
+    // from the trailing legs of every strip of every surface for this solution; half of it is the velocity at the bound vortex. It does not depend on the
+    // length of the wake.
+    Vector3d const wakedir(1.0, 0.0, 0.0);
+    std::vector<TrefftzStrip> trefftzStrips;
+    makeTrefftzStrips(Mu3, wakedir, trefftzStrips);
+    auto trefftzWash = [&](Panel3 const &p3)
+    {
+        Vector3d pt = (p3.leftTrailingNode() + p3.rightTrailingNode())/2.0;
+        pt -= wakedir * pt.dot(wakedir);
+        return trefftzVelocity(pt, wakedir, trefftzStrips) * 0.5;
+    };
+
 //    int m=0;
 
     for(int i3=0; i3<nPanels(); i3++)
@@ -1034,11 +1056,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 // velocity is not force-free under a lateral perturbation (issue #7)
                 // The thin strips need it too: their leading-edge force is the difference of this force and the panel forces
                 {
-                    Vector3d WgFF;
-                    midWakePoint(p3W, left, right);
-                    mid = (left + right)/2.0;
-                    getVelocityVector(mid, Mu3, Sigma3, WgFF, 0.0001, true, true);
-                    WgFF *= 0.5;
+                    Vector3d WgFF = trefftzWash(p3);
                     WgFF += VInf.at(i3);
                     stripforce  =  WgFF * vortex;
                     stripforce *= GammaStrip * m_pPolar3d->density();     // N
@@ -1097,11 +1115,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             // same far-field force as in the mid-panel branch above
             if(m_bFarField)
             {
-                Vector3d WgFF;
-                midWakePoint(p3W, left, right);
-                mid = (left + right)/2.0;
-                getVelocityVector(mid, Mu3, Sigma3, WgFF, 0.0001, true, true);
-                WgFF *= 0.5;
+                Vector3d WgFF = trefftzWash(p3);
                 WgFF += VInf.at(i3);
                 stripforce  = vortex * WgFF;
                 stripforce *= GammaStrip * m_pPolar3d->density();     // N
