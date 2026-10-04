@@ -1030,6 +1030,19 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
 
+    // The far-field velocity of the strips is the one of the polar's induced force (trefftzDrag): the analytic Trefftz plane perpendicular to the wake sheet,
+    // from the trailing legs of every strip of every surface for this solution; half of it is the velocity at the bound vortex. It does not depend on the
+    // length of the wake.
+    Vector3d const wakedir(1.0, 0.0, 0.0);
+    std::vector<TrefftzStrip> trefftzStrips;
+    makeTrefftzStrips(Mu4, wakedir, trefftzStrips);
+    auto trefftzWash = [&](Vector3d const &a, Vector3d const &b)
+    {
+        Vector3d pt = (a+b)/2.0;
+        pt -= wakedir * pt.dot(wakedir);
+        return trefftzVelocity(pt, wakedir, trefftzStrips) * 0.5;
+    };
+
 //    int m=0;
     for(int i4=0; i4<nPanels(); i4++)
     {
@@ -1044,12 +1057,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
 //                Panel4 const *p4W = m_WakePanel4.data() + p4.m_iWake;
 //                C = trailingWakePoint(p4W);
                 // modified in 7.01 beta09 to use vortex lines rather than wake panels
-                C = (p4.TA() + p4.TB())/2.0;
-                C.x = m_pPolar3d->TrefftzDistance()/2.0;
-//                getVelocityVector(C, m_Panel4, m_WakePanel4, Mu4, Sigma4, Wg, 0.00001, true);
-                getFarFieldVelocity(C, m_Panel4, Mu4, Wg, Vortex::coreRadius());
-                Wg *=  4.0*PI;
-                Wg *= 1.0/2.0;
+                Wg = trefftzWash(p4.TA(), p4.TB());
 
                 int idxB = p4.index();
                 int idxU = nextTopTrailingPanelIndex(p4);
@@ -1082,10 +1090,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
                 // velocity is not force-free under a lateral perturbation (issue #7)
                 if(m_bFarField)
                 {
-                    Vector3d WgFF;
-                    Panel4 const *p4w = m_WakePanel4.data() + p4.iWake();
-                    getVelocityVector(midWakePoint(p4w), Mu4, Sigma4, WgFF, Vortex::coreRadius(), true, false);
-                    WgFF *= 0.5;
+                    Vector3d WgFF = trefftzWash(p4.TA(), p4.TB());
                     WgFF += VInf.at(i4);
                     stripforce  = WgFF * vortex;
                     stripforce *= GammaStrip;      // N/rho
@@ -1107,17 +1112,9 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
                     Panel4 const &pp4 = m_Panel4.at(pp);
                     if(m_pPolar3d->isVLM1() || pp4.isTrailing())
                     {
-                        C = p4.m_CtrlPt;
-                        // evaluate at half the ff distance, so that we get influence of upstream and downstream parts of the vortices
-                        // then divide the influence by 2.0
-                        C.x = m_pPolar3d->TrefftzDistance()/2.0;
-
-                        getVelocityVector(C, Mu4, Sigma4, Wg, Vortex::coreRadius(), true);
-
-                        // The trailing point sees both the upstream and downstream parts of the trailing vortices
-                        // Hence it sees twice the downwash.
-                        // So divide by 2 to account for this.
-                        Wg *= 1.0/2.0;
+                        // the Trefftz plane sees twice the downwash of the bound vortex: trefftzWash() is half of it
+                        if(m_pPolar3d->isVLM2()) Wg = trefftzWash(p4.TA(), p4.TB());
+                        else                     Wg = trefftzWash(p4.m_VA, p4.m_VB);
 
                         Wg += VInf.at(i4);
 
@@ -1477,6 +1474,64 @@ void P4Analysis::inducedForce(int nPanels, double QInf, double alpha, double bet
 }
 
 
+/**
+ * The trailing strips of every surface of the plane as the point vortices of the Trefftz plane perpendicular to wakedir.
+ * Used by trefftzDrag() and by forces(), so that the polar and the derivatives share one far-field velocity.
+ */
+void P4Analysis::makeTrefftzStrips(double const *Mu4, Vector3d const &wakedir, std::vector<TrefftzStrip> &strips) const
+{
+    strips.clear();
+    for(int index=0; index<nPanels(); index++)
+    {
+        Panel4 const &q4 = m_Panel4.at(index);
+        if(!q4.isTrailing()) continue;
+        TrefftzStrip s;
+        s.iPanel = index;
+        if(!m_pPolar3d->isVLM())
+        {
+            if(!(q4.isBotPanel() || q4.isMidPanel())) continue;
+            if(!q4.isMidPanel())
+            {
+                s.Gamma = -(Mu4[nextTopTrailingPanelIndex(q4)] - Mu4[index]) *4.0*PI;
+                s.A = q4.TB();  // the vortex is the opposite of trailingVortex()
+                s.B = q4.TA();
+            }
+            else
+            {
+                s.Gamma = -Mu4[index] *4.0*PI;
+                s.A = q4.TA();
+                s.B = q4.TB();
+            }
+        }
+        else
+        {
+            // the horseshoe legs of the strip's panels coincide: the strip's circulation is the sum of the panels'
+            s.A = q4.m_VA;
+            s.B = q4.m_VB;
+            if(m_pPolar3d->isVLM2())
+            {
+                s.A = q4.TA();
+                s.B = q4.TB();
+                s.Gamma = Mu4[index];
+            }
+            else
+            {
+                int pp = index;
+                do
+                {
+                    s.Gamma += Mu4[pp];
+                    if(m_Panel4.at(pp).isLeading()) break;
+                    pp++;
+                }
+                while(pp<nPanels());
+            }
+        }
+        strips.push_back(s);
+    }
+    projectTrefftzStrips(wakedir, strips);
+}
+
+
 /** Calculates the induced drag in the Trefftz plane
  * The Trefttz plane is half-way down the wake panels to avoid end-effects
  */
@@ -1511,57 +1566,7 @@ void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta
     // The Trefftz plane is perpendicular to the wake sheet (the mesh x axis). The trailing legs of every strip of every surface, projected in it, are point vortices:
     // the length of the horseshoe legs and the direction of the wake sheet do not enter.
     std::vector<TrefftzStrip> strips;
-    if(bTrefftzPlane)
-    {
-        for(int index=0; index<this->nPanels(); index++)
-        {
-            Panel4 const &q4 = m_Panel4.at(index);
-            if(!q4.isTrailing()) continue;
-            TrefftzStrip s;
-            s.iPanel = index;
-            if(!m_pPolar3d->isVLM())
-            {
-                if(!(q4.isBotPanel() || q4.isMidPanel())) continue;
-                if(!q4.isMidPanel())
-                {
-                    s.Gamma = -(Mu4[nextTopTrailingPanelIndex(q4)] - Mu4[index]) *4.0*PI;
-                    s.A = q4.TB();  // the vortex is the opposite of trailingVortex()
-                    s.B = q4.TA();
-                }
-                else
-                {
-                    s.Gamma = -Mu4[index] *4.0*PI;
-                    s.A = q4.TA();
-                    s.B = q4.TB();
-                }
-            }
-            else
-            {
-                // the horseshoe legs of the strip's panels coincide: the strip's circulation is the sum of the panels'
-                s.A = q4.m_VA;
-                s.B = q4.m_VB;
-                if(m_pPolar3d->isVLM2())
-                {
-                    s.A = q4.TA();
-                    s.B = q4.TB();
-                    s.Gamma = Mu4[index];
-                }
-                else
-                {
-                    int pp = index;
-                    do
-                    {
-                        s.Gamma += Mu4[pp];
-                        if(m_Panel4.at(pp).isLeading()) break;
-                        pp++;
-                    }
-                    while(pp<this->nPanels());
-                }
-            }
-            strips.push_back(s);
-        }
-        projectTrefftzStrips(wakedir, strips);
-    }
+    if(bTrefftzPlane) makeTrefftzStrips(Mu4, wakedir, strips);
 
     // the velocity at the strip's mid-point, in the plane; half of it is the velocity at the bound vortex
     auto trefftzWash = [&](Vector3d const &a, Vector3d const &b)

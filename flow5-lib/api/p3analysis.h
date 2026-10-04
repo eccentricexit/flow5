@@ -90,6 +90,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
         void forces(const double *Mu3, const double *Sigma3, double alpha, double beta, const Vector3d &CoG, bool bFuseMi, std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment) override;
         void inducedForce(int nPanel3, double QInf, double alpha, double beta, int pos3, Vector3d &ForceBodyAxes, SpanDistribs &distribFF) const override;
+        void makeTrefftzStrips(double const *mu3, Vector3d const &wakedir, std::vector<TrefftzStrip> &strips) const;
         void trefftzDrag(int nPanel3, double QInf, double alpha, double beta, int pos3, Vector3d &Drag, SpanDistribs &distribFF, bool bTrefftzPlane) const override;
 
         double getPotential(Vector3d const &C, const double *mu, const double *sigma) const;
