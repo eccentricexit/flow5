@@ -81,6 +81,8 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         void restorePanels() override;
         bool computeTrimmedConditions(double mass, Vector3d const &CoG, double &alphaeq, double &u0, bool bFuseMi) override;
         int makeWakePanels(Vector3d const &WindDirection, bool bVortonWake) override;
+        bool hasThickSurfaces() const override;
+        bool yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product) override;
         void scaleResultsToSpeed(double ratio) override;
         void makeMu(int qrhs) override;
         virtual void getDoubletInfluence(Vector3d const &C, Panel3 const &p3, Vector3d *V, double *phi, double coreradius, bool bUseRFF) const;
@@ -89,6 +91,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
 
         void forces(const double *Mu3, const double *Sigma3, double alpha, double beta, const Vector3d &CoG, bool bFuseMi, std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment) override;
+        void sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment) const;
         void inducedForce(int nPanel3, double QInf, double alpha, double beta, int pos3, Vector3d &ForceBodyAxes, SpanDistribs &distribFF) const override;
         void makeTrefftzStrips(double const *mu3, Vector3d const &wakedir, std::vector<TrefftzStrip> &strips) const;
         void trefftzDrag(int nPanel3, double QInf, double alpha, double beta, int pos3, Vector3d &Drag, SpanDistribs &distribFF, bool bTrefftzPlane) const override;

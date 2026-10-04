@@ -701,6 +701,48 @@ int P3Analysis::makeWakePanels(const Vector3d &WindDirection, bool bVortonWake)
 }
 
 
+bool P3Analysis::hasThickSurfaces() const
+{
+    for(Panel3 const &p3 : m_Panel3)
+        if(p3.isTrailing() && p3.isBotPanel()) return true;
+    return false;
+}
+
+
+/**
+ * product = (dA_wake/dtheta).mu, by a central difference of the wake's rows of the influence matrix between the wake yawed by +theta and by -theta
+ * (it leaves each trailing edge along (cos theta, sin theta, 0)), applied to the doublet strengths mu without building the matrix.
+ * The wake panels of the analysis are restored on return.
+ */
+bool P3Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product)
+{
+    int N = matSize();
+    if(int(mu.size())!=N || theta<=0.0) return false;
+
+    std::vector<Panel3> wake0 = m_WakePanel3;
+    std::vector<double> pp(N, 0.0), pm(N, 0.0);
+    bool bOk = true;
+    for(int s=0; s<2 && bOk; s++)
+    {
+        double th = s==0 ? theta : -theta;
+        std::vector<double> &out = s==0 ? pp : pm;
+        makeWakePanels(Vector3d(cos(th), sin(th), 0.0), false);
+        m_pWakeProduct = &out;
+        m_pWakeMu = mu.data();
+        makeWakeContribution();
+        m_pWakeProduct = nullptr;
+        m_pWakeMu = nullptr;
+        bOk = !m_bMatrixError;
+    }
+    m_WakePanel3 = wake0;
+    if(!bOk) return false;
+
+    product.resize(N);
+    for(int i=0; i<N; i++) product[i] = (pp[i]-pm[i])/(2.0*theta);
+    return true;
+}
+
+
 int P3Analysis::matSize() const
 {
     if(!m_pPolar3d) return nPanels();
@@ -956,6 +998,86 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 
 
 /**
+ * +1 or -1: the sense in which a ring of positive doublet density, counter-clockwise about the panel's normal, circulates, in the sense of the strip circulation
+ * Gamma of forces(), whose force is V x Gamma T: the trailing edge of the panel, traversed counter-clockwise, runs along (+1) or against (-1) T.
+ */
+static double ringOrientation(Panel3 const &p3, Vector3d const &T)
+{
+    Vector3d a = p3.vertexAt(1) - p3.vertexAt(0);
+    Vector3d b = p3.vertexAt(2) - p3.vertexAt(0);
+    bool bCCW = (a*b).dot(p3.normal()) >= 0.0;
+    Vector3d te = bCCW ? p3.vertexAt(2) - p3.vertexAt(1) : p3.vertexAt(1) - p3.vertexAt(2);
+    return te.dot(T) >= 0.0 ? 1.0 : -1.0;
+}
+
+
+/**
+ * The free-stream Kutta-Joukowski force of the thin sheets' vorticity, at the positions of the vorticity (uav#79).
+ *
+ * A doublet density mu on a sheet is the vorticity n x grad(mu) over the triangles plus, along every edge, the vortex line of circulation (jump of mu), and
+ * along the outer edges the line of circulation mu itself. For the nodal densities Mu3 (linear on each triangle, 3 values per panel) each triangle is then a
+ * ring of circulation G.mu(s) along its edges, G = 4 pi per unit doublet density with the sign of its strip, closed by the area vorticity -G n x grad(mu):
+ * its total force is zero and its moment is not. Summed over the triangles the jumps along shared edges are left, and the edges between the strips
+ * are the chordwise vorticity d(mu)/dy that the strip force V x Gamma l of forces() cannot see, since it puts the whole force at the trailing edge, at
+ * the quarter point. The trailing edges are left out: the wake continues the doublet density there, so that no vortex line closes it. The force of the
+ * sheets is then the free-stream part of the strips' far-field force (Stokes), to rounding; only its distribution differs, hence the moment.
+ *
+ * Adds the moment about the CoG (N.m) to Moment and sets Force (N), a check. Thin strips only; the Trefftz-plane part stays on the strips.
+ */
+void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment) const
+{
+    Force.set(0.0, 0.0, 0.0);
+    double G = G4pi * m_pPolar3d->density();
+    for(int i3=0; i3<nPanels(); i3++)
+    {
+        Panel3 const &p3 = m_Panel3.at(i3);
+        if(!p3.isWingPanel() || p3.isFusePanel()) continue;
+        Vector3d const &V = VInf.at(i3);
+        Vector3d n = p3.normal();
+
+        // the vertices counter-clockwise about the normal
+        int vi[3] = {0, 1, 2};
+        {
+            Vector3d a = p3.vertexAt(1) - p3.vertexAt(0);
+            Vector3d b = p3.vertexAt(2) - p3.vertexAt(0);
+            if((a*b).dot(n) < 0.0) {vi[1]=2; vi[2]=1;}
+        }
+        Vector3d x[3];
+        double mu[3];
+        for(int k=0; k<3; k++)
+        {
+            x[k]  = p3.vertexAt(vi[k]);
+            mu[k] = Mu3[3*i3+vi[k]];
+        }
+        double area = ((x[1]-x[0]) * (x[2]-x[0])).dot(n) / 2.0;
+        if(area<=0.0) continue;
+
+        // the area vorticity, at the centroid
+        Vector3d grad;
+        for(int k=0; k<3; k++) grad += (n * (x[(k+2)%3] - x[(k+1)%3])) * mu[k];
+        grad *= 1.0/(2.0*area);
+        Vector3d centroid = (x[0]+x[1]+x[2])/3.0;
+        Vector3d Fa = (V * (n * grad)) * (-G * area);
+        Moment += (centroid - CoG) * Fa;
+        Force  += Fa;
+
+        // the lines along the edges, but the trailing edge
+        for(int k=0; k<3; k++)
+        {
+            int k1 = (k+1)%3;
+            if(p3.isTrailing() && vi[k]+vi[k1]==3) continue;     // vertices 1 and 2 are the trailing nodes
+            Vector3d l = x[k1] - x[k];
+            double m0 = (mu[k]+mu[k1])/2.0;
+            Vector3d lever = (x[k]-CoG)*m0 + l*((mu[k]+2.0*mu[k1])/6.0);   // integral of mu (x-CoG) along the edge
+            Vector3d dF = V * l;
+            Moment += (lever * dF) * G;
+            Force  += dF * (m0 * G);
+        }
+    }
+}
+
+
+/**
 * Calculates the forces using a far-field method.
 * Calculates the moments by a near field method, i.e. direct summation on the panels.
 * The downwash is evaluated far downstream (i.e. where the inluence of the bounded vortices is negligible)
@@ -971,8 +1093,13 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 * far-field strip forces, at the mid-wake point as the force of the polar, in m_ForceFF, and their moment about the CoG in m_MomentFF.
 * A trailing wake point that lies in another surface's wake sheet (a stabiliser at the wing's height) does not see the far-field velocity:
 * the derivatives taken from it are wrong, so the derivatives in the plane of symmetry (Xu, Zu, Xw, Zw, Xq, Zq) and the control
-* derivatives take m_ForceFF. The lateral ones stay on the trailing wake point: the far-field velocity is not force-free under a lateral
-* perturbation (issue #7).
+* derivatives take m_ForceFF. The sideslip (v) derivatives take it too, with the Trefftz plane perpendicular to the free stream, along which the wake of a
+* sideslipped state leaves the trailing edges (m_bSideslipFarField); with the plane perpendicular to the body x axis the far-field velocity is not
+* force-free under a lateral perturbation (issue #7).
+*
+* In the sideslip derivatives m_MomentFF puts the free-stream part of the strips' forces on the vorticity of the sheet instead of the quarter points
+* (sheetVorticityLoad(), thin surfaces; uav#79): the strips' force V x Gamma l_TE is right as a total (Stokes), but lumps at the quarter point the chordwise
+* vorticity d(mu)/dy between the strips, whose force in a sideslip carries the rolling and yawing moments.
 *
 * m_MomentFF applies each strip's far-field force at the strip's quarter-chord point, so it has no chordwise load. m_MomentLocal is the
 * moment about these points of the strips' own chordwise loads: the panel pressures and, on thin surfaces, the leading-edge force. The
@@ -1004,13 +1131,17 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     // the strips' far-field forces (N), their quarter-chord and leading edge points, the sums of their panel forces (N/rho),
     // whether their leading-edge force is to be added (thin strips), and the strip that each panel belongs to (-1 for none: fuselage, tips)
     std::vector<Vector3d> stripFF, stripQP, stripLE, stripFP;
+    std::vector<double> stripG;   // sign of the circulation of a counter-clockwise ring of a unit doublet density, in 4 pi units: the sideslip vorticity's orientation
     std::vector<bool> stripThin;
     std::vector<int> stripOfPanel(nPanels(), -1);
 
     // The far-field velocity of the strips is the one of the polar's induced force (trefftzDrag): the analytic Trefftz plane perpendicular to the wake sheet,
     // from the trailing legs of every strip of every surface for this solution; half of it is the velocity at the bound vortex. It does not depend on the
     // length of the wake.
-    Vector3d const wakedir(1.0, 0.0, 0.0);
+    bool bSheetLoad = m_bFarField && m_bSideslipVorticity;   // thin surfaces, sideslip derivatives (uav#79)
+
+    Vector3d wakedir(1.0, 0.0, 0.0);
+    if(m_bSideslipFarField && !VInf.empty() && VInf.front().norm()>0.0) wakedir = VInf.front()/VInf.front().norm();   // the sideslip derivatives' wake leaves along the free stream
     std::vector<TrefftzStrip> trefftzStrips;
     makeTrefftzStrips(Mu3, wakedir, trefftzStrips);
     auto trefftzWash = [&](Panel3 const &p3)
@@ -1057,12 +1188,23 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 // The thin strips need it too: their leading-edge force is the difference of this force and the panel forces
                 {
                     Vector3d WgFF = trefftzWash(p3);
+                    Vector3d wash = WgFF;
                     WgFF += VInf.at(i3);
                     stripforce  =  WgFF * vortex;
                     stripforce *= GammaStrip * m_pPolar3d->density();     // N
                     m_ForceFF += stripforce;
                     Vector3d quarterpoint = stripQuarterPoint(p3);
-                    if(m_bFarField) m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
+                    if(m_bFarField)
+                    {
+                        if(bSheetLoad)
+                        {
+                            // only the Trefftz-plane part is lumped at the quarter point: the free-stream part is put on the vortex lines of the sheet below
+                            Vector3d inducedforce = wash * vortex;
+                            inducedforce *= GammaStrip * m_pPolar3d->density();     // N
+                            m_MomentFF += (quarterpoint - CoG) * inducedforce;   // N.m
+                        }
+                        else m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
+                    }
 
                     // walk the strip upstream, to its leading edge
                     int iStrip = int(stripFF.size());
@@ -1078,6 +1220,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                     stripLE.push_back(pLast->leadingEdgeMidpoint());
                     stripFP.push_back(Vector3d());
                     stripThin.push_back(true);
+                    stripG.push_back(ringOrientation(p3, vortex) * 4.0*PI);
                 }
 
  //               m++;
@@ -1138,9 +1281,17 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 stripLE.push_back(quarterpoint);
                 stripFP.push_back(Vector3d());
                 stripThin.push_back(false);
+                stripG.push_back(ringOrientation(m_Panel3.at(idxU), p3.trailingVortex()) * 4.0*PI);   // the ring of the top trailing panel
             }
 //            m++;
         }
+    }
+
+    // The free-stream Kutta-Joukowski force on the vorticity of the sheets, at the vortex lines' own positions (sideslip derivatives)
+    if(bSheetLoad && !stripG.empty())
+    {
+        Vector3d sheetForce;
+        sheetVorticityLoad(Mu3, VInf, CoG, stripG.front(), sheetForce, m_MomentFF);
     }
 
     //On-Body moment

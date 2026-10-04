@@ -199,20 +199,17 @@ void P3UniAnalysis::makeWakeMatrixBlock(int iBlock)
                 if(p3k.isMidPanel())
                 {
                     // add contribution to bot panel
-                    if(s_bDoublePrecision) m_aijd[unsigned(i3*N+k3)] += MatWakeContrib;
-                    else                   m_aijf[unsigned(i3*N+k3)] += float(MatWakeContrib);
+                    addWakeEntry(i3, k3, N, MatWakeContrib);
                 }
                 else if(p3k.isBotPanel())
                 {
                     // add contribution to bot panel
-                    if(s_bDoublePrecision) m_aijd[unsigned(i3*N+k3)] += MatWakeContrib * (-1);
-                    else                   m_aijf[unsigned(i3*N+k3)] += float(MatWakeContrib) * (-1.0f);
+                    addWakeEntry(i3, k3, N, -MatWakeContrib);
 
                     // add opposite contribution to opposite top TE panel's contribution
                     int k3t = p3k.oppositeIndex();
                     assert(k3t>=0 && k3t<nPanels());
-                    if(s_bDoublePrecision) m_aijd[unsigned(i3*N+k3t)] += MatWakeContrib;
-                    else                   m_aijf[unsigned(i3*N+k3t)] += float(MatWakeContrib);
+                    addWakeEntry(i3, k3t, N, MatWakeContrib);
                 }
             }
         }

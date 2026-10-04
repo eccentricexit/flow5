@@ -92,6 +92,11 @@ class FL5LIB_EXPORT PanelAnalysis
         virtual void makeRHSBlock(int iBlock, double *RHS, std::vector<Vector3d> const &VField, Vector3d const*normals) const = 0;
         virtual void makeUnitDoubletStrengths(double alpha, double beta) = 0;
         virtual void makeWakeMatrixBlock(int iBlock) = 0;
+        /** Sets product = (dA_wake/dtheta).mu: the change of the wake's rows of the influence matrix when the wake, which leaves the trailing edges along the
+         *  body x axis, is yawed by theta (rad, positive towards +y), times the doublet strengths mu. Triangle methods only; returns false if the method has no such matrix. */
+        /** true if some surface is a closed thick body (triangle methods): its sideslip derivatives keep the older model, see computeTranslationDerivatives() */
+        virtual bool hasThickSurfaces() const {return false;}
+        virtual bool yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product) {(void)theta; (void)mu; (void)product; return false;}
 
         virtual void makeMu(int qrhs) = 0;
         virtual void makeLocalVelocities(std::vector<double> const &uRHS, std::vector<double> const &vRHS, std::vector<double> const &wRHS,
@@ -168,6 +173,14 @@ class FL5LIB_EXPORT PanelAnalysis
         virtual void backSubUnitRHS(double *uRHS, double *vRHS, double*wRHS, double *pRHS, double *qRHS, double*rRHS);
         bool backSubRHS(std::vector<double> &RHS);
 
+        /** Adds v to the entry (row, col) of the influence matrix, or, in the matrix-vector mode of yawedWakeProduct(), v times mu[col] to entry row of the product. Rows are never shared between threads. */
+        void addWakeEntry(int row, int col, int N, double v)
+        {
+            if(m_pWakeProduct)         (*m_pWakeProduct)[unsigned(row)] += v * m_pWakeMu[col];
+            else if(s_bDoublePrecision) m_aijd[unsigned(row*N+col)] += v;
+            else                        m_aijf[unsigned(row*N+col)] += float(v);
+        }
+
     protected:
 
         mutable std::string m_ErrorLog;
@@ -205,6 +218,10 @@ class FL5LIB_EXPORT PanelAnalysis
         bool m_bSequence;           /**< true if the calculation is should be performed for a range of aoa */
         bool m_bWarning;     /**< true if one the OpPoints could not be properly interpolated */
         bool m_bMatrixError;
+        bool m_bSideslipFarField = false;   /**< true while computeTranslationDerivatives() evaluates the sideslip (v) derivatives: the far-field force has its Trefftz plane perpendicular to the free stream, along which the wake leaves (uav#79) */
+        bool m_bSideslipVorticity;   /**< true while computeTranslationDerivatives() evaluates the sideslip (v) derivatives: forces() then puts the free-stream Kutta-Joukowski force of the doublet sheet's vorticity, chordwise as well as spanwise, at the vortex lines' own positions in m_MomentFF, instead of lumping it at the strips' quarter-chord points (uav#79) */
+        std::vector<double> *m_pWakeProduct;   /**< if not null, makeWakeMatrixBlock() does not touch the matrix: it adds each wake entry times m_pWakeMu to this vector (see yawedWakeProduct()) */
+        double const *m_pWakeMu;
         bool m_bFarField;            /**< true if forces() should also evaluate the far-field force m_ForceFF and moments m_MomentFF and m_MomentLocal; it is costly, and only the stability and control derivatives (computeTranslationDerivatives(), computeAngularDerivatives(), PlaneTask::computeControlDerivatives()) need it */
 
         xfl::enumAnalysisStatus m_AnalysisStatus;
