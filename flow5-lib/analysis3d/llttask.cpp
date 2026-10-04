@@ -832,7 +832,7 @@ PlaneOpp* LLTTask::createPlaneOpp(double QInf, double Alpha, bool bWingOut)
     for (int l=0; l<nStation; l++)
     {
         int ll = nStation-l;
-        maindist.m_StripPos[l]      = -m_SpanPos.at(ll);
+        maindist.m_StripPos[l]      =  m_SpanPos.at(ll);
         maindist.m_StripArea[l]     =  m_StripArea.at(ll);
         maindist.m_Ai[l]            =  m_Ai.at(ll);
         maindist.m_Cl[l]            =  m_Cl.at(ll);
