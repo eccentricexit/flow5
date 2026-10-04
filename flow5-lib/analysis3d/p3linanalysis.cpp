@@ -154,6 +154,7 @@ void P3LinAnalysis::makeWakeMatrixBlock(int iBlock)
             Panel3 const &p3k = m_Panel3.at(k3);
             if(p3k.isTrailing() && (p3k.isBotPanel() || p3k.isMidPanel()))
             {
+                if(m_pWakeProduct && m_RowSkip[i3]) continue;
                 // whether p3k is on the left or right wing,
                 // node 1 is its left trailing node and node 2 is its right trailing node
                 // node 0 is the panel3's leading edge and doesn't get any contribution
@@ -186,22 +187,9 @@ void P3LinAnalysis::makeWakeMatrixBlock(int iBlock)
     //                    col0 = 3*k3;
                         col1 = 3*k3+1;
                         col2 = 3*k3+2;
-                        if(s_bDoublePrecision)
-                        {
-                            // add the wake's left contribution to basis function 1
-                            m_aijd[unsigned(row*N + col1)] += sign * LeftContrib[ib];
-
-                            // add the wake's right contribution to basis function 2
-                            m_aijd[unsigned(row*N + col2)] += sign * RightContrib[ib];
-                        }
-                        else
-                        {
-                            // add the wake's left contribution to basis function 1
-                            m_aijf[unsigned(row*N + col1)] += float(sign * LeftContrib[ib]);
-
-                            // add the wake's right contribution to basis function 2
-                            m_aijf[unsigned(row*N + col2)] += float(sign * RightContrib[ib]);
-                        }
+                        // add the wake's left contribution to basis function 1, and its right contribution to basis function 2
+                        addWakeEntry(row, col1, N, sign * LeftContrib[ib]);
+                        addWakeEntry(row, col2, N, sign * RightContrib[ib]);
                     }
                 }
                 else if(p3k.isBotPanel())
@@ -214,22 +202,9 @@ void P3LinAnalysis::makeWakeMatrixBlock(int iBlock)
     //                    col0 = 3*k3;
                         col1 = 3*k3+1;
                         col2 = 3*k3+2;
-                        if(s_bDoublePrecision)
-                        {
-                            // add the wake's left contribution to basis function 1
-                            m_aijd[unsigned(row*N + col1)] += sign * LeftContrib[ib];
-
-                            // add the wake's right contribution to basis function 2
-                            m_aijd[unsigned(row*N + col2)] += sign * RightContrib[ib];
-                        }
-                        else
-                        {
-                            // add the wake's left contribution to basis function 1
-                            m_aijf[unsigned(row*N + col1)] += float(sign * LeftContrib[ib]);
-
-                            // add the wake's right contribution to basis function 2
-                            m_aijf[unsigned(row*N + col2)] += float(sign * RightContrib[ib]);
-                        }
+                        // add the wake's left contribution to basis function 1, and its right contribution to basis function 2
+                        addWakeEntry(row, col1, N, sign * LeftContrib[ib]);
+                        addWakeEntry(row, col2, N, sign * RightContrib[ib]);
                     }
 
                     // add opposite wake contribution to opposite top TE panel's contribution
@@ -241,22 +216,9 @@ void P3LinAnalysis::makeWakeMatrixBlock(int iBlock)
     //                    col0 = 3*k3;
                         col1 = 3*k3t+1;
                         col2 = 3*k3t+2;
-                        if(s_bDoublePrecision)
-                        {
-                            // add the wake's left contribution to basis function 1
-                            m_aijd[unsigned(row*N + col1)] += sign * LeftContrib[ib];
-
-                            // add the wake's right contribution to basis function 2
-                            m_aijd[unsigned(row*N + col2)] += sign * RightContrib[ib];
-                        }
-                        else
-                        {
-                            // add the wake's left contribution to basis function 1
-                            m_aijf[unsigned(row*N + col1)] += float(sign * LeftContrib[ib]);
-
-                            // add the wake's right contribution to basis function 2
-                            m_aijf[unsigned(row*N + col2)] += float(sign * RightContrib[ib]);
-                        }
+                        // add the wake's left contribution to basis function 1, and its right contribution to basis function 2
+                        addWakeEntry(row, col1, N, sign * LeftContrib[ib]);
+                        addWakeEntry(row, col2, N, sign * RightContrib[ib]);
                     }
                 }
             }

@@ -26,6 +26,8 @@
 
 #include <iostream>
 #include <thread>
+#include <map>
+#include <cstdio>
 #include <format>
 
 
@@ -67,6 +69,9 @@ PanelAnalysis::PanelAnalysis()
     m_bSequence    = false;
     m_bWarning     = false;
     m_bFarField = false;
+    m_bSideslipVorticity = false;
+    m_pWakeProduct = nullptr;
+    m_pWakeMu = nullptr;
 
     m_nBlocks     = s_MaxThreads;
 
@@ -832,6 +837,33 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
+        // Thin surfaces: the sideslip derivatives follow the physics of a wing in sideslip (uav#79), in three parts.
+        // 1. The wake leaves the trailing edges along the free stream: in a sideslip of the angle theta it is yawed by theta from the body x axis, which changes
+        //    the circulation. To first order, mu(V+) = mu_linear(V+) + theta dmu and mu(V-) = mu_linear(V-) - theta dmu, with dmu = -A^-1 (dA_wake/dtheta) mu0,
+        //    A the influence matrix of the x-aligned wake and mu0 the solution of the reference state. The derivative of the wake's rows is a central
+        //    difference between the wake yawed by +-0.01 rad: far larger than theta so that the quadrature noise of the integrals is not amplified.
+        // 2. The far-field force has its Trefftz plane perpendicular to that wake (m_bSideslipFarField), and CY is taken from it.
+        // 3. The free-stream force on the sheet's vorticity is applied where the vorticity is (m_bSideslipVorticity).
+        // Thick surfaces keep the older model for now: the sheet's vorticity is the thickness' as well, which the free stream alone does not load.
+        bool bSideslipModel = !hasThickSurfaces();
+        if(bSideslipModel)
+        {
+            std::vector<double> yawProduct;
+            if(deltaspeed<0.1*u0 && yawedWakeProduct(1.0e-2, m_cRHS, yawProduct))
+            {
+                for(double &d : yawProduct) d = -d;
+                backSubRHS(yawProduct);
+                double theta = deltaspeed/u0;
+                for(int i=0; i<int(yawProduct.size()); i++)
+                {
+                    m_VpRHS[i] += theta * yawProduct[i];
+                    m_VmRHS[i] -= theta * yawProduct[i];
+                }
+            }
+            m_bSideslipVorticity = true;
+            m_bSideslipFarField = true;
+        }
+
         makeLocalVelocities(m_VpRHS, notanrhs, m_VmRHS, m_uVLocal, m_vVLocal, m_wVLocal, objects::windDirection(alphaeq, 0.0));
 
         if(m_pPolar3d->isTriUniformMethod())
@@ -850,11 +882,16 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         computeOnBodyCp(VField.at(1), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+1*N, alpha, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
         MomentFFp = m_MomentFF;
+        if(bSideslipModel) Forcep = m_ForceFF;
 
         computeOnBodyCp(VField.at(4), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+4*N, alpha, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
         MomentFFm = m_MomentFF;
+        if(bSideslipModel) Forcem = m_ForceFF;
+        m_bSideslipVorticity = false;
+        m_bSideslipFarField = false;
     }
+    // The quad methods (VLM2) keep the old lateral model: their on-body moment ignores the direction of the perturbed wind and their legs leave along x (uav#79)
     SD.Yv = (Forcem - Forcep).dot(js)   /deltaspeed/2.0;
     // the on-body pressure moment picks up a spurious response to lateral perturbations (cf. issue #7):
     // the roll and yaw derivatives are based on the moment of the far-field strip forces instead
