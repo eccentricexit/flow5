@@ -848,7 +848,7 @@ PlaneOpp* LLTTask::createPlaneOpp(double QInf, double Alpha, bool bWingOut)
         maindist.m_XTrTop[l]        =  m_XTrTop.at(ll);
         maindist.m_XTrBot[l]        =  m_XTrBot.at(ll);
         maindist.m_BendingMoment[l] =  m_BendingMoment.at(ll);
-        maindist.m_F[l].set( 0,0,qDyn*m_StripArea.at(l)*m_Cl.at(ll));
+        maindist.m_F[l].set( 0,0,qDyn*m_StripArea.at(ll)*m_Cl.at(ll));
         maindist.m_Vd[l].set(0,0,QInf*tan(m_Ai[ll]*PI/180.0));
 
         m_pWing->surfacePoint(0.25, maindist.m_StripPos[l], xfl::MIDSURFACE, maindist.m_PtC4[l], N);
