@@ -1498,13 +1498,17 @@ void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta
     //   Define wind axes
     Vector3d winddir = objects::windDirection(alpha, beta);
 
+    // The wake sheet leaves the trailing edges along the x axis of the mesh (the free stream in a control polar, which turns the mesh):
+    // the Trefftz plane is perpendicular to it, so that the induced velocity is normal to the sheet and the induced force along x
+    Vector3d wakedir(1.0, 0.0, 0.0);
+
     //dynamic pressure, kg/m³
     double qDyn = 0.5 * m_pPolar3d->density() * QInf * QInf;
 
     double const *Mu4    = m_Mu.data();
     double const *Sigma4 = m_Sigma.data();
 
-    // The Trefftz plane is perpendicular to the wind. The trailing legs of every strip of every surface, projected in it, are point vortices:
+    // The Trefftz plane is perpendicular to the wake sheet (the mesh x axis). The trailing legs of every strip of every surface, projected in it, are point vortices:
     // the length of the horseshoe legs and the direction of the wake sheet do not enter.
     std::vector<TrefftzStrip> strips;
     if(bTrefftzPlane)
@@ -1556,15 +1560,15 @@ void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta
             }
             strips.push_back(s);
         }
-        projectTrefftzStrips(winddir, strips);
+        projectTrefftzStrips(wakedir, strips);
     }
 
     // the velocity at the strip's mid-point, in the plane; half of it is the velocity at the bound vortex
     auto trefftzWash = [&](Vector3d const &a, Vector3d const &b)
     {
         Vector3d pt = (a+b)/2.0;
-        pt -= winddir * pt.dot(winddir);
-        return trefftzVelocity(pt, winddir, strips) * 0.5;
+        pt -= wakedir * pt.dot(wakedir);
+        return trefftzVelocity(pt, wakedir, strips) * 0.5;
     };
 
     int m=0;

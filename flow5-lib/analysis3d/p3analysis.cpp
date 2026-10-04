@@ -818,6 +818,9 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 
     //   Define wind axis
     Vector3d winddir = objects::windDirection(alpha, beta);
+    // The wake sheet leaves the trailing edges along the x axis of the mesh (the free stream in a control polar, which turns the mesh):
+    // the Trefftz plane is perpendicular to it, so that the induced velocity is normal to the sheet and the induced force along x
+    Vector3d wakedir(1.0, 0.0, 0.0);
 
     //dynamic pressure, kg/m³
     double qDyn = 0.5 * m_pPolar3d->density() * QInf * QInf;
@@ -834,7 +837,7 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 
     if(SpanResFF.m_FInduced.size()!=SpanResFF.m_F.size()) SpanResFF.m_FInduced.assign(SpanResFF.m_F.size(), Vector3d());
 
-    // The Trefftz plane is perpendicular to the wind. The trailing legs of every strip of every surface, projected in it, are point vortices:
+    // The Trefftz plane is perpendicular to the wake sheet (the mesh x axis). The trailing legs of every strip of every surface, projected in it, are point vortices:
     // the finite length of the wake and the direction of the wake sheet do not enter.
     std::vector<TrefftzStrip> strips;
     if(bTrefftzPlane)
@@ -864,7 +867,7 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
             s.Gamma = gamma;
             strips.push_back(s);
         }
-        projectTrefftzStrips(winddir, strips);
+        projectTrefftzStrips(wakedir, strips);
     }
 
     // Note: parallelization fails, incompatibility with std::vectors of SpanDistribs
@@ -881,8 +884,8 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
             {
                 // the velocity at the strip's mid-point, in the plane; half of it is the velocity at the bound vortex
                 Vector3d pt = (p3.leftTrailingNode() + p3.rightTrailingNode())/2.0;
-                pt -= winddir * pt.dot(winddir);
-                Wg_m = trefftzVelocity(pt, winddir, strips) * 0.5;
+                pt -= wakedir * pt.dot(wakedir);
+                Wg_m = trefftzVelocity(pt, wakedir, strips) * 0.5;
             }
             else
             {
