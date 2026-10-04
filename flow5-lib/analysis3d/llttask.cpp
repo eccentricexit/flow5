@@ -29,6 +29,8 @@
 //https://developercommunity.visualstudio.com/t/Visual-Studio-17100-Update-leads-to-Pr/10669759?sort=newest
 //#define _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR
 
+#include <algorithm>
+#include <cmath>
 #include <format>
 
 
@@ -46,6 +48,31 @@ int LLTTask::s_IterLim = 100;
 int LLTTask::s_NLLTStations = 20;
 double LLTTask::s_RelaxMax = 20.0;
 double LLTTask::s_CvPrec = 0.01;
+
+/**
+ * The relaxation that keeps the iterations stable grows faster than the number of stations (measured on a
+ * rectangular AR 8 wing: the smallest stable factor is 11 at 20 stations, 31 at 40 and 105 at 80), because the
+ * induction of the stations next to the tips scales as the square of their number. The relaxation factor and the
+ * iteration limit are given for the default of 20 stations and scaled with the square of the station count,
+ * never below 1; the number of iterations to convergence is proportional to the relaxation.
+ */
+double LLTTask::stationScale()
+{
+    double s = double(s_NLLTStations)/double(s_DefaultStations);
+    return std::max(1.0, s*s);
+}
+
+
+double LLTTask::effectiveRelaxation()
+{
+    return s_RelaxMax * stationScale();
+}
+
+
+int LLTTask::effectiveMaxIter()
+{
+    return int(std::ceil(double(s_IterLim) * stationScale()));
+}
 
 
 LLTTask::LLTTask()
@@ -88,6 +115,8 @@ void LLTTask::resetVariables()
     m_PCd.resize(          s_NLLTStations+1);
     m_Cm.resize(           s_NLLTStations+1);
     m_CmAirf.resize(       s_NLLTStations+1);
+    m_CmPres.resize(       s_NLLTStations+1);
+    m_CmVisc.resize(       s_NLLTStations+1);
     m_XCPSpanRel.resize(   s_NLLTStations+1);
     m_XCPSpanAbs.resize(   s_NLLTStations+1);
     m_BendingMoment.resize(s_NLLTStations+1);
@@ -106,6 +135,8 @@ void LLTTask::resetVariables()
     std::fill(m_PCd.begin(),           m_PCd.end(),           0);
     std::fill(m_Cm.begin(),            m_Cm.end(),            0);
     std::fill(m_CmAirf.begin(),        m_CmAirf.end(),        0);
+    std::fill(m_CmPres.begin(),        m_CmPres.end(),        0);
+    std::fill(m_CmVisc.begin(),        m_CmVisc.end(),        0);
     std::fill(m_XCPSpanRel.begin(),    m_XCPSpanRel.end(),    0);
     std::fill(m_XCPSpanAbs.begin(),    m_XCPSpanAbs.end(),    0);
     std::fill(m_BendingMoment.begin(), m_BendingMoment.end(), 0);
@@ -265,10 +296,13 @@ bool LLTTask::computeWing(double QInf, double Alpha, std::string &ErrMessage)
         Vector3d Minv  = LeverArm * Finv;      // Inviscid moment, Nm/qS
         Vector3d Mvisc = LeverArm * Fvisc;     // Viscousmoment,   Nm/qS
 
-        double Cm_i = m_CmAirf[m] + Minv.y /m_pWing->MAC();  // N.m/qSc
-        double Cm_v =               Mvisc.y/m_pWing->MAC();  // N.m/qSc
+        // referenced to the strip's chord: the integrals below weigh these by c^2 (moment = Cm * c * c * dy)
+        double Cm_i = m_CmAirf[m] + Minv.y /m_Chord[m];      // N.m/q/c/area
+        double Cm_v =               Mvisc.y/m_Chord[m];      // N.m/q/c/area
 
-        m_Cm[m] = Cm_i + Cm_v;                               // N.m/qSc
+        m_CmPres[m] = Cm_i;
+        m_CmVisc[m] = Cm_v;
+        m_Cm[m] = Cm_i + Cm_v;
 
         eta = Eta(m);
         sigma = Sigma(m);
@@ -485,7 +519,9 @@ bool LLTTask::iterate(double &QInf, double Alpha, int &iter)
     double maxa(0);
 
     iter = 0;
-    while(iter<s_IterLim)
+    int iterlim = effectiveMaxIter();
+    double relax = effectiveRelaxation();
+    while(iter<iterlim)
     {
         maxa = 0.0;
 
@@ -493,7 +529,7 @@ bool LLTTask::iterate(double &QInf, double Alpha, int &iter)
         {
             double a        = m_Ai[k];
             double anext    = -alphaInduced(k);
-            m_Ai[k]  = a +(anext-a)/s_RelaxMax;
+            m_Ai[k]  = a +(anext-a)/relax;
             maxa   = std::max(maxa, std::abs(a-anext));
         }
 
@@ -647,7 +683,7 @@ bool LLTTask::alphaLoop()
             s_bInitCalc = true;
             traceStdLog(strange);
         }
-        else if (bSuccess && iter<s_IterLim)
+        else if (bSuccess && iter<effectiveMaxIter())
         {
             //converged,
             strange= std::format("    ...converged after {:d} iterations\n", iter);
@@ -657,13 +693,11 @@ bool LLTTask::alphaLoop()
             bool bOut = computeWing(m_pPlPolar->velocity(), alpha, str);// generates wing results,
             traceStdLog(str);
             if (bOut) m_bWarning = true;
-            PlaneOpp *pPOpp = createPlaneOpp(QInf, alpha, bOut);
+            PlaneOpp *pPOpp = createPlaneOpp(QInf, alpha, bOut); // adds the point to the polar unless it is out of the envelope
 
             // store the results
             if(pPOpp)
             {
-                m_pPlPolar->addPlaneOpPointData(pPOpp);
-
                 if(m_bKeepOpps)
                 {
                     m_PlaneOppList.push_back(pPOpp);
@@ -686,11 +720,11 @@ bool LLTTask::alphaLoop()
             traceStdLog(strange);
             s_bInitCalc = true;
         }
-        else if(iter>=s_IterLim)
+        else if(iter>=effectiveMaxIter())
         {
             m_bWarning = true;
             m_bError = true;
-            strange= std::format("    ...unconverged after {:d} iterations out of {:d}\n", iter, s_IterLim);
+            strange= std::format("    ...unconverged after {:d} iterations out of {:d}\n", iter, effectiveMaxIter());
             traceStdLog(strange);
             s_bInitCalc = true;
         }
@@ -797,26 +831,34 @@ PlaneOpp* LLTTask::createPlaneOpp(double QInf, double Alpha, bool bWingOut)
     pNewPOpp->m_bGround = false;
     pNewPOpp->m_GroundHeight = 0.0;
 
+    // m_CL, m_CDi, m_CDv and the moment coefficients are normalised by the wing's own planform area, span and MAC
+    // (computeWing). AeroForces divides by the polar's reference dimensions, which differ for a PROJECTED area
+    // with dihedral or a CUSTOM reference: store the forces and moments in N/q and N.m/q.
+    double wingArea = m_pWing->planformArea();
+    double wingSpan = m_pWing->planformSpan();
+    double wingMAC  = m_pWing->MAC();
+
     Vector3d FFF; // wind axis
-    FFF.x = m_CDi * m_pPlPolar->referenceArea();            // N/q
-    FFF.z = m_CL * m_pPlPolar->referenceArea();             // N/q
+    FFF.x = m_CDi * wingArea;            // N/q
+    FFF.z = m_CL  * wingArea;            // N/q
     // store in body axis
     double cosa = cos(Alpha*PI/180.0);
     double sina = sin(Alpha*PI/180.0);
     af.setFff({FFF.x*cosa-FFF.z*sina, 0.0, FFF.x*sina+FFF.z*cosa});
 
-    af.setProfileDrag(m_CDv* m_pPlPolar->referenceArea());
+    af.setProfileDrag(m_CDv * wingArea);
 
+    // the rolling and yawing moment coefficients are normalised by area x span, the pitching moment by area x MAC
     Vector3d Mi;
-    Mi.x = m_GRm * m_pPlPolar->referenceChordLength() * m_pPlPolar->referenceArea();            // N.m/q
-    Mi.y = m_ICm * m_pPlPolar->referenceChordLength() * m_pPlPolar->referenceArea();            // N.m/q
-    Mi.z = m_IYm * m_pPlPolar->referenceChordLength() * m_pPlPolar->referenceArea();            // N.m/q
+    Mi.x = m_GRm * wingArea * wingSpan;    // N.m/q
+    Mi.y = m_ICm * wingArea * wingMAC;     // N.m/q
+    Mi.z = m_IYm * wingArea * wingSpan;    // N.m/q
     af.setMi(Mi);
 
     Vector3d Mv;
     Mv.x = 0.0;
-    Mv.y = m_VCm * m_pPlPolar->referenceChordLength() * m_pPlPolar->referenceArea();            // N.m/q
-    Mv.z = m_VYm * m_pPlPolar->referenceChordLength() * m_pPlPolar->referenceArea();            // N.m/q
+    Mv.y = m_VCm * wingArea * wingMAC;     // N.m/q
+    Mv.z = m_VYm * wingArea * wingSpan;    // N.m/q
     af.setMv(Mv);
 
 //    af.setCP(m_CP);
@@ -832,14 +874,15 @@ PlaneOpp* LLTTask::createPlaneOpp(double QInf, double Alpha, bool bWingOut)
     for (int l=0; l<nStation; l++)
     {
         int ll = nStation-l;
-        maindist.m_StripPos[l]      = -m_SpanPos.at(ll);
+        maindist.m_StripPos[l]      =  m_SpanPos.at(ll);
         maindist.m_StripArea[l]     =  m_StripArea.at(ll);
         maindist.m_Ai[l]            =  m_Ai.at(ll);
         maindist.m_Cl[l]            =  m_Cl.at(ll);
         maindist.m_PCd[l]           =  m_PCd.at(ll);
         maindist.m_ICd[l]           =  m_ICd.at(ll);
-        maindist.m_CmPressure[l]    =  m_Cm.at(ll);
-        maindist.m_CmViscous[l]     =  m_CmAirf.at(ll);
+        maindist.m_CmPressure[l]    =  m_CmPres.at(ll);
+        maindist.m_CmViscous[l]     =  m_CmVisc.at(ll);
+        maindist.m_CmC4[l]          =  m_CmAirf.at(ll);
         maindist.m_XCPSpanRel[l]    =  m_XCPSpanRel.at(ll);
         maindist.m_XCPSpanAbs[l]    =  m_XCPSpanAbs.at(ll);
         maindist.m_Re[l]            =  m_Re.at(ll);
@@ -848,12 +891,12 @@ PlaneOpp* LLTTask::createPlaneOpp(double QInf, double Alpha, bool bWingOut)
         maindist.m_XTrTop[l]        =  m_XTrTop.at(ll);
         maindist.m_XTrBot[l]        =  m_XTrBot.at(ll);
         maindist.m_BendingMoment[l] =  m_BendingMoment.at(ll);
-        maindist.m_F[l].set( 0,0,qDyn*m_StripArea.at(l)*m_Cl.at(ll));
+        maindist.m_F[l].set( 0,0,qDyn*m_StripArea.at(ll)*m_Cl.at(ll));
         maindist.m_Vd[l].set(0,0,QInf*tan(m_Ai[ll]*PI/180.0));
 
         m_pWing->surfacePoint(0.25, maindist.m_StripPos[l], xfl::MIDSURFACE, maindist.m_PtC4[l], N);
 
-        if(fabs(m_BendingMoment[l])>fabs(Cb)) Cb = m_BendingMoment[l];
+        if(fabs(m_BendingMoment[ll])>fabs(Cb)) Cb = m_BendingMoment[ll];
     }
     mainwopp.m_MaxBending = Cb;
 
