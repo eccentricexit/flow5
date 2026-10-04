@@ -120,7 +120,7 @@ class FL5LIB_EXPORT P4Analysis : public PanelAnalysis
         Vector3d stripQuarterPoint(Panel4 const &p4) const;
 
         void inducedForce(int nPanel3, double QInf, double alpha, double beta, int pos, Vector3d &ForceBodyAxes, SpanDistribs &SpanResFF) const override;
-        void trefftzDrag(int nPanels, double QInf, double alpha, double beta, int pos, Vector3d &FFForce, SpanDistribs &SpanResFF) const override;
+        void trefftzDrag(int nPanels, double QInf, double alpha, double beta, int pos, Vector3d &FFForce, SpanDistribs &SpanResFF, bool bTrefftzPlane) const override;
 
         Panel *panel(int p) override {if(p>=0 && p<nPanels()) return m_Panel4.data()+p; else return nullptr;}
         Panel const *panelAt(int p) const override {if(p>=0 && p<nPanels()) return m_Panel4.data()+p; else return nullptr;}

@@ -758,9 +758,9 @@ void BoatTask::computeInducedDrag(double alpha, double beta, double QInf, int qr
         else
         {
             if(m_pBtPolar->isQuadMethod() && m_pP4A)
-                m_pP4A->trefftzDrag(pSail->nPanel4(), QInf, alpha, beta, pos, Drag, pSail->spanDistFF());
+                m_pP4A->trefftzDrag(pSail->nPanel4(), QInf, alpha, beta, pos, Drag, pSail->spanDistFF(), false);
             else if(m_pBtPolar->isTriangleMethod() && m_pP3A)
-                m_pP3A->trefftzDrag(pSail->nPanel3(), QInf, alpha, beta, pos, Drag, pSail->spanDistFF());
+                m_pP3A->trefftzDrag(pSail->nPanel3(), QInf, alpha, beta, pos, Drag, pSail->spanDistFF(), false);
         }
         SailForce[qrhs*nSails+iw] += Drag;     // N/q, body axes
         SpanDist[qrhs*nSails+iw].m_ICd = pSail->spanDistFF().m_ICd;

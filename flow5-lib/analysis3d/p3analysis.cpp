@@ -808,7 +808,7 @@ void P3Analysis::inducedForce(int nPanel3, double QInf, double alpha, double bet
 
 
 void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta, int pos3,
-                             Vector3d &Drag, SpanDistribs &SpanResFF) const
+                             Vector3d &Drag, SpanDistribs &SpanResFF, bool bTrefftzPlane) const
 {
     Vector3d left, right;
     Vector3d Wg_m;
@@ -834,6 +834,39 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
 
     if(SpanResFF.m_FInduced.size()!=SpanResFF.m_F.size()) SpanResFF.m_FInduced.assign(SpanResFF.m_F.size(), Vector3d());
 
+    // The Trefftz plane is perpendicular to the wind. The trailing legs of every strip of every surface, projected in it, are point vortices:
+    // the finite length of the wake and the direction of the wake sheet do not enter.
+    std::vector<TrefftzStrip> strips;
+    if(bTrefftzPlane)
+    {
+        for(int index=0; index<nPanels(); index++)
+        {
+            Panel3 const &p3 = m_Panel3.at(index);
+            if(!p3.isTrailing() || !(p3.isBotPanel() || p3.isMidPanel())) continue;
+
+            double gamma=0;
+            if(p3.isMidPanel())
+            {
+                int idxM = p3.index();
+                gamma = -(mu3[3*idxM+1]+mu3[3*idxM+2])/2.0 *4.0*PI;
+            }
+            else
+            {
+                int idxB = p3.index();
+                int idxU = nextTopTrailingPanelIndex(p3);
+                assert(idxU>=0);
+                gamma = (-(mu3[3*idxU+1]+mu3[3*idxU+2]) + (mu3[3*idxB+1]+mu3[3*idxB+2]))/2.0 *4.0*PI;
+            }
+            TrefftzStrip s;
+            s.iPanel = index;
+            s.A = p3.leftTrailingNode();
+            s.B = p3.rightTrailingNode();
+            s.Gamma = gamma;
+            strips.push_back(s);
+        }
+        projectTrefftzStrips(winddir, strips);
+    }
+
     // Note: parallelization fails, incompatibility with std::vectors of SpanDistribs
     int m=0;
     for(int i3=0; i3<nPanel3; i3++)
@@ -844,6 +877,15 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
         StripForce.set(0,0,0);
         if(p3.isTrailing() && (p3.isBotPanel() || p3.isMidPanel()))
         {
+            if(bTrefftzPlane)
+            {
+                // the velocity at the strip's mid-point, in the plane; half of it is the velocity at the bound vortex
+                Vector3d pt = (p3.leftTrailingNode() + p3.rightTrailingNode())/2.0;
+                pt -= winddir * pt.dot(winddir);
+                Wg_m = trefftzVelocity(pt, winddir, strips) * 0.5;
+            }
+            else
+            {
             // get the last triangle of the wake column
             assert(p3.iWake()>=0 && p3.iWake()<nWakePanels());
             Panel3 const *p3W = m_WakePanel3.data() + p3.iWake();
@@ -857,6 +899,7 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
             getVelocityVector(midwakept, mu3, sigma3, Wg_m, 0.0001, true);
 
             Wg_m *= 0.5;
+            }
 
 //s_DebugPts.push_back(mid);
 //s_DebugVecs.push_back(Wg_m);
