@@ -29,6 +29,8 @@
 //https://developercommunity.visualstudio.com/t/Visual-Studio-17100-Update-leads-to-Pr/10669759?sort=newest
 //#define _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR
 
+#include <algorithm>
+#include <cmath>
 #include <format>
 
 
@@ -46,6 +48,31 @@ int LLTTask::s_IterLim = 100;
 int LLTTask::s_NLLTStations = 20;
 double LLTTask::s_RelaxMax = 20.0;
 double LLTTask::s_CvPrec = 0.01;
+
+/**
+ * The relaxation that keeps the iterations stable grows faster than the number of stations (measured on a
+ * rectangular AR 8 wing: the smallest stable factor is 11 at 20 stations, 31 at 40 and 105 at 80), because the
+ * induction of the stations next to the tips scales as the square of their number. The relaxation factor and the
+ * iteration limit are given for the default of 20 stations and scaled with the square of the station count,
+ * never below 1; the number of iterations to convergence is proportional to the relaxation.
+ */
+double LLTTask::stationScale()
+{
+    double s = double(s_NLLTStations)/double(s_DefaultStations);
+    return std::max(1.0, s*s);
+}
+
+
+double LLTTask::effectiveRelaxation()
+{
+    return s_RelaxMax * stationScale();
+}
+
+
+int LLTTask::effectiveMaxIter()
+{
+    return int(std::ceil(double(s_IterLim) * stationScale()));
+}
 
 
 LLTTask::LLTTask()
@@ -485,7 +512,9 @@ bool LLTTask::iterate(double &QInf, double Alpha, int &iter)
     double maxa(0);
 
     iter = 0;
-    while(iter<s_IterLim)
+    int iterlim = effectiveMaxIter();
+    double relax = effectiveRelaxation();
+    while(iter<iterlim)
     {
         maxa = 0.0;
 
@@ -493,7 +522,7 @@ bool LLTTask::iterate(double &QInf, double Alpha, int &iter)
         {
             double a        = m_Ai[k];
             double anext    = -alphaInduced(k);
-            m_Ai[k]  = a +(anext-a)/s_RelaxMax;
+            m_Ai[k]  = a +(anext-a)/relax;
             maxa   = std::max(maxa, std::abs(a-anext));
         }
 
@@ -647,7 +676,7 @@ bool LLTTask::alphaLoop()
             s_bInitCalc = true;
             traceStdLog(strange);
         }
-        else if (bSuccess && iter<s_IterLim)
+        else if (bSuccess && iter<effectiveMaxIter())
         {
             //converged,
             strange= std::format("    ...converged after {:d} iterations\n", iter);
@@ -684,11 +713,11 @@ bool LLTTask::alphaLoop()
             traceStdLog(strange);
             s_bInitCalc = true;
         }
-        else if(iter>=s_IterLim)
+        else if(iter>=effectiveMaxIter())
         {
             m_bWarning = true;
             m_bError = true;
-            strange= std::format("    ...unconverged after {:d} iterations out of {:d}\n", iter, s_IterLim);
+            strange= std::format("    ...unconverged after {:d} iterations out of {:d}\n", iter, effectiveMaxIter());
             traceStdLog(strange);
             s_bInitCalc = true;
         }

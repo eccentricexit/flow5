@@ -107,7 +107,11 @@ class LLTTask : public Task3d
         FL5LIB_EXPORT static int maxIter() {return s_IterLim;}
         FL5LIB_EXPORT static double convergencePrecision() {return s_CvPrec;}
         FL5LIB_EXPORT static int nSpanStations() {return s_NLLTStations;}
-        FL5LIB_EXPORT static double relaxationFactor() {return s_RelaxMax;}
+        FL5LIB_EXPORT static double relaxationFactor() {return s_RelaxMax;} // given for the default number of stations
+
+        /** The relaxation factor and the iteration limit in force: the given values scaled for the number of stations */
+        FL5LIB_EXPORT static double effectiveRelaxation();
+        FL5LIB_EXPORT static int effectiveMaxIter();
 
     private:
         double alphaInduced(int k) const;
@@ -176,6 +180,9 @@ class LLTTask : public Task3d
         std::vector<int> m_iter;
         std::vector<double> m_Max_a;
 
+
+        static constexpr int s_DefaultStations = 20;   /**< the number of stations for which the relaxation factor and the iteration limit are given */
+        static double stationScale();
 
         static int s_IterLim;                       /**< The maximum number of iterations in the calculation */
         static int s_NLLTStations;                  /**< The number of LLT stations in the spanwise direction */
