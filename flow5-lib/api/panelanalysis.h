@@ -51,7 +51,7 @@ struct VelBlockData
 
 
 /** A trailing strip as seen in the Trefftz plane: the bound vortex runs from A to B with circulation Gamma (N/rho/V), the trailing legs
- *  at A and B run along the wind, so that in the plane they are two point vortices of opposite sign. */
+ *  at A and B run along the wake direction (the mesh x axis), so that in the plane they are two point vortices of opposite sign. */
 struct TrefftzStrip
 {
     int iPanel = -1;        /**< the index of the strip's trailing panel */
@@ -122,8 +122,8 @@ class FL5LIB_EXPORT PanelAnalysis
         void makeSourceStrengths(Vector3d const &WindDirection);
         void makeSourceStrengths(std::vector<Vector3d> const &WindDirection);
 
-        static void projectTrefftzStrips(Vector3d const &winddir, std::vector<TrefftzStrip> &strips);
-        static Vector3d trefftzVelocity(Vector3d const &pt, Vector3d const &winddir, std::vector<TrefftzStrip> const &strips);
+        static void projectTrefftzStrips(Vector3d const &wakedir, std::vector<TrefftzStrip> &strips);
+        static Vector3d trefftzVelocity(Vector3d const &pt, Vector3d const &wakedir, std::vector<TrefftzStrip> const &strips);
 
         void vortonDrag(double alpha, double beta, double QInf, int n0, int nStations, Vector3d &Drag, SpanDistribs &SpanResFF) const;
 
