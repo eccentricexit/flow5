@@ -657,13 +657,11 @@ bool LLTTask::alphaLoop()
             bool bOut = computeWing(m_pPlPolar->velocity(), alpha, str);// generates wing results,
             traceStdLog(str);
             if (bOut) m_bWarning = true;
-            PlaneOpp *pPOpp = createPlaneOpp(QInf, alpha, bOut);
+            PlaneOpp *pPOpp = createPlaneOpp(QInf, alpha, bOut); // adds the point to the polar unless it is out of the envelope
 
             // store the results
             if(pPOpp)
             {
-                m_pPlPolar->addPlaneOpPointData(pPOpp);
-
                 if(m_bKeepOpps)
                 {
                     m_PlaneOppList.push_back(pPOpp);
