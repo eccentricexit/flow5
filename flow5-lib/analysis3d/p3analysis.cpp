@@ -703,7 +703,7 @@ int P3Analysis::makeWakePanels(const Vector3d &WindDirection, bool bVortonWake)
 
 /**
  * Whether the panel i3 is left out of the product of yawedWakeProduct() for the wake column shed by the trailing panel k3: a panel of another wing within
- * a quarter of the reference chord of the sheet of that column and downstream of it. The sheet's lateral velocity jumps across it, so that such a point
+ * half the reference chord of the sheet of that column and downstream of it. The sheet's lateral velocity jumps across it, so that such a point
  * (a fin crossing the wake of the wing) has no derivative with respect to the yaw of the wake that a mesh can resolve: it keeps the unyawed wake.
  */
 bool P3Analysis::wakeRowExcluded(int i3, int k3) const
@@ -757,7 +757,7 @@ bool P3Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, s
         m_Component.resize(nPanels());
         for(int i=0; i<nPanels(); i++) m_Component[i] = find(m_Panel3.at(i).nodeIndex(0));
     }
-    m_WakeClearance = 0.25 * m_pPolar3d->referenceChordLength();
+    m_WakeClearance = 0.5 * m_pPolar3d->referenceChordLength();
 
     m_RowSkip.assign(nPanels(), 0);
     {
@@ -769,7 +769,7 @@ bool P3Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, s
         int nSkip = 0;
         for(char c : m_RowSkip) nSkip += c;
         if(nSkip>0)
-            traceStdLog(std::format("      sideslip derivatives: {:d} panels lie within a quarter chord of another surface's wake sheet and keep the unyawed wake\n", nSkip));
+            traceStdLog(std::format("      sideslip derivatives: {:d} panels lie within half a reference chord of another surface's wake sheet and keep the unyawed wake\n", nSkip));
     }
 
     std::vector<Panel3> wake0 = m_WakePanel3;
