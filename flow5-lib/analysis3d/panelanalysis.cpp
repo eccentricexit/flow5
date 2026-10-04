@@ -26,6 +26,8 @@
 
 #include <iostream>
 #include <thread>
+#include <map>
+#include <cstdio>
 #include <format>
 
 

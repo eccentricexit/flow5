@@ -168,6 +168,7 @@ void P3UniAnalysis::makeWakeMatrixBlock(int iBlock)
             Panel3 const &p3k = m_Panel3.at(k3);
             if(p3k.isTrailing() && (p3k.isBotPanel() || p3k.isMidPanel()))
             {
+                if(m_pWakeProduct && m_RowSkip[i3]) continue;
                 double MatWakeContrib = 0.0;
                 int jWake=p3k.iWake();
 

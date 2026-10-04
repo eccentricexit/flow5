@@ -701,6 +701,30 @@ int P3Analysis::makeWakePanels(const Vector3d &WindDirection, bool bVortonWake)
 }
 
 
+/**
+ * Whether the panel i3 is left out of the product of yawedWakeProduct() for the wake column shed by the trailing panel k3: a panel of another wing within
+ * a quarter of the reference chord of the sheet of that column and downstream of it. The sheet's lateral velocity jumps across it, so that such a point
+ * (a fin crossing the wake of the wing) has no derivative with respect to the yaw of the wake that a mesh can resolve: it keeps the unyawed wake.
+ */
+bool P3Analysis::wakeRowExcluded(int i3, int k3) const
+{
+    if(m_Component.empty() || m_Component[i3]==m_Component[k3]) return false;
+    Panel3 const &p3k = m_Panel3.at(k3);
+    Vector3d Tl = p3k.leftTrailingNode(), Tr = p3k.rightTrailingNode();
+    Vector3d e = Tr - Tl;
+    double L = e.norm();
+    if(L<=0.0) return false;
+    e *= 1.0/L;
+    Vector3d nw = e * Vector3d(1.0, 0.0, 0.0);
+    double nn = nw.norm();
+    if(nn<1e-9) return false;
+    nw *= 1.0/nn;
+    Vector3d d = m_Panel3.at(i3).CoG() - Tl;
+    double c = m_WakeClearance;
+    return d.x>0.0 && fabs(d.dot(nw))<c && d.dot(e)>-c && d.dot(e)<L+c;
+}
+
+
 bool P3Analysis::hasThickSurfaces() const
 {
     for(Panel3 const &p3 : m_Panel3)
@@ -718,6 +742,35 @@ bool P3Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, s
 {
     int N = matSize();
     if(int(mu.size())!=N || theta<=0.0) return false;
+
+    // the wings of the mesh: panels sharing a node are one piece
+    {
+        std::vector<int> parent(m_pRefTriMesh->nodeCount()+1);
+        for(unsigned i=0; i<parent.size(); i++) parent[i] = int(i);
+        auto find = [&](int a){while(parent[a]!=a){parent[a]=parent[parent[a]]; a=parent[a];} return a;};
+        for(Panel3 const &p3 : m_Panel3)
+            for(int k=1; k<3; k++)
+            {
+                int a = find(p3.nodeIndex(0)), b = find(p3.nodeIndex(k));
+                if(a!=b) parent[a] = b;
+            }
+        m_Component.resize(nPanels());
+        for(int i=0; i<nPanels(); i++) m_Component[i] = find(m_Panel3.at(i).nodeIndex(0));
+    }
+    m_WakeClearance = 0.25 * m_pPolar3d->referenceChordLength();
+
+    m_RowSkip.assign(nPanels(), 0);
+    {
+        std::vector<int> te;
+        for(int k=0; k<nPanels(); k++) if(m_Panel3.at(k).isTrailing() && (m_Panel3.at(k).isBotPanel() || m_Panel3.at(k).isMidPanel())) te.push_back(k);
+        for(int i=0; i<nPanels(); i++)
+            for(int k : te)
+                if(wakeRowExcluded(i, k)) {m_RowSkip[i] = 1; break;}
+        int nSkip = 0;
+        for(char c : m_RowSkip) nSkip += c;
+        if(nSkip>0)
+            traceStdLog(std::format("      sideslip derivatives: {:d} panels lie within a quarter chord of another surface's wake sheet and keep the unyawed wake\n", nSkip));
+    }
 
     std::vector<Panel3> wake0 = m_WakePanel3;
     std::vector<double> pp(N, 0.0), pm(N, 0.0);

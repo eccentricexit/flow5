@@ -154,6 +154,7 @@ void P3LinAnalysis::makeWakeMatrixBlock(int iBlock)
             Panel3 const &p3k = m_Panel3.at(k3);
             if(p3k.isTrailing() && (p3k.isBotPanel() || p3k.isMidPanel()))
             {
+                if(m_pWakeProduct && m_RowSkip[i3]) continue;
                 // whether p3k is on the left or right wing,
                 // node 1 is its left trailing node and node 2 is its right trailing node
                 // node 0 is the panel3's leading edge and doesn't get any contribution

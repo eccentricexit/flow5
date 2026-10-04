@@ -82,6 +82,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         bool computeTrimmedConditions(double mass, Vector3d const &CoG, double &alphaeq, double &u0, bool bFuseMi) override;
         int makeWakePanels(Vector3d const &WindDirection, bool bVortonWake) override;
         bool hasThickSurfaces() const override;
+        bool wakeRowExcluded(int i3, int k3) const;
         bool yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product) override;
         void scaleResultsToSpeed(double ratio) override;
         void makeMu(int qrhs) override;
@@ -131,6 +132,9 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
 
     protected:
+        std::vector<char> m_RowSkip;                /**< the panels left out of the yawed wake's product, set by yawedWakeProduct() */
+        std::vector<int> m_Component;               /**< the connected piece (wing) of each panel, set by yawedWakeProduct() */
+        double m_WakeClearance = 0.0;               /**< the distance from a wake column within which another wing's panels are left out of the yawed wake's product, set by yawedWakeProduct() */
         TriMesh const *m_pRefTriMesh;
         std::vector<Panel3> m_Panel3;               /**< the panel array for the currently loaded plane */
         std::vector<Panel3> m_refPanel3;
