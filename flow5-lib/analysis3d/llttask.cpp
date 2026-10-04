@@ -115,6 +115,8 @@ void LLTTask::resetVariables()
     m_PCd.resize(          s_NLLTStations+1);
     m_Cm.resize(           s_NLLTStations+1);
     m_CmAirf.resize(       s_NLLTStations+1);
+    m_CmPres.resize(       s_NLLTStations+1);
+    m_CmVisc.resize(       s_NLLTStations+1);
     m_XCPSpanRel.resize(   s_NLLTStations+1);
     m_XCPSpanAbs.resize(   s_NLLTStations+1);
     m_BendingMoment.resize(s_NLLTStations+1);
@@ -133,6 +135,8 @@ void LLTTask::resetVariables()
     std::fill(m_PCd.begin(),           m_PCd.end(),           0);
     std::fill(m_Cm.begin(),            m_Cm.end(),            0);
     std::fill(m_CmAirf.begin(),        m_CmAirf.end(),        0);
+    std::fill(m_CmPres.begin(),        m_CmPres.end(),        0);
+    std::fill(m_CmVisc.begin(),        m_CmVisc.end(),        0);
     std::fill(m_XCPSpanRel.begin(),    m_XCPSpanRel.end(),    0);
     std::fill(m_XCPSpanAbs.begin(),    m_XCPSpanAbs.end(),    0);
     std::fill(m_BendingMoment.begin(), m_BendingMoment.end(), 0);
@@ -292,10 +296,13 @@ bool LLTTask::computeWing(double QInf, double Alpha, std::string &ErrMessage)
         Vector3d Minv  = LeverArm * Finv;      // Inviscid moment, Nm/qS
         Vector3d Mvisc = LeverArm * Fvisc;     // Viscousmoment,   Nm/qS
 
-        double Cm_i = m_CmAirf[m] + Minv.y /m_pWing->MAC();  // N.m/qSc
-        double Cm_v =               Mvisc.y/m_pWing->MAC();  // N.m/qSc
+        // referenced to the strip's chord: the integrals below weigh these by c^2 (moment = Cm * c * c * dy)
+        double Cm_i = m_CmAirf[m] + Minv.y /m_Chord[m];      // N.m/q/c/area
+        double Cm_v =               Mvisc.y/m_Chord[m];      // N.m/q/c/area
 
-        m_Cm[m] = Cm_i + Cm_v;                               // N.m/qSc
+        m_CmPres[m] = Cm_i;
+        m_CmVisc[m] = Cm_v;
+        m_Cm[m] = Cm_i + Cm_v;
 
         eta = Eta(m);
         sigma = Sigma(m);
@@ -873,8 +880,9 @@ PlaneOpp* LLTTask::createPlaneOpp(double QInf, double Alpha, bool bWingOut)
         maindist.m_Cl[l]            =  m_Cl.at(ll);
         maindist.m_PCd[l]           =  m_PCd.at(ll);
         maindist.m_ICd[l]           =  m_ICd.at(ll);
-        maindist.m_CmPressure[l]    =  m_Cm.at(ll);
-        maindist.m_CmViscous[l]     =  m_CmAirf.at(ll);
+        maindist.m_CmPressure[l]    =  m_CmPres.at(ll);
+        maindist.m_CmViscous[l]     =  m_CmVisc.at(ll);
+        maindist.m_CmC4[l]          =  m_CmAirf.at(ll);
         maindist.m_XCPSpanRel[l]    =  m_XCPSpanRel.at(ll);
         maindist.m_XCPSpanAbs[l]    =  m_XCPSpanAbs.at(ll);
         maindist.m_Re[l]            =  m_Re.at(ll);

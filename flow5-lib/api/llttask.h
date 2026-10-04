@@ -164,6 +164,8 @@ class LLTTask : public Task3d
         std::vector<double> m_Cl;                       /**< Local lift coefficient at the span stations */
         std::vector<double> m_Cm;                       /**< Total pitching moment coefficient at the span stations */
         std::vector<double> m_CmAirf;                   /**< Airfoil part of the pitching moment coefficient at the span stations */
+        std::vector<double> m_CmPres;   /**< the strip's moment of the pressure forces about the CoG, normalised by the strip's chord and area */
+        std::vector<double> m_CmVisc;   /**< the strip's moment of the viscous drag about the CoG, same normalisation */
         std::vector<double> m_ICd;                      /**< Induced Drag coefficient at the span stations */
         std::vector<double> m_PCd;                      /**< Viscous Drag coefficient at the span stations */
         std::vector<double> m_XCPSpanAbs;               /**< Center of Pressure pos at the span stations */
