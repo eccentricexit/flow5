@@ -111,7 +111,7 @@ void PlanePolar::setDefaults()
     m_RefSpan  = 0.0;
 
     m_BufferWakeFactor   = 0.3;  // x MAC
-    m_TotalWakeLengthFactor = 30.0;
+    m_TotalWakeLengthFactor = 120.0;
     m_VPWMaxLength       = 30.0;
     m_VortonL0           = 1.0;  // x MAC
     m_WakePanelFactor = 1.1;
