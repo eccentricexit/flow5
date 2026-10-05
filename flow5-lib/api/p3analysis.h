@@ -125,6 +125,19 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         int nextTopTrailingPanelIndex(const Panel3 &p3) const;
         Vector3d stripQuarterPoint(Panel3 const &p3) const;
 
+        // Steady rotating states, for the type-8 points with body rates (thin triangle methods; see PlaneTask::T123458Loop()). A state is the onset flow V + (r-CoG) x Omega
+        // (V the velocity of the air relative to the plane's CoG, Omega its rotation vector, both in geometry axes), solved with the unit solutions of u, v, w, p, q and r.
+        void makeStateSolution(Vector3d const &V, Vector3d const &Omega, Vector3d const &CoG, std::vector<double> &sol) const;
+        void makeOnsetField(Vector3d const &V, Vector3d const &Omega, Vector3d const &CoG, std::vector<Vector3d> &field) const;
+        void setStateDoublets(std::vector<double> const &sol);
+        void makeStateCp(std::vector<double> const &sol, std::vector<Vector3d> const &field, double QInf, double alpha);
+        bool makeYawedWakeCorrection(std::vector<double> const &sol0, std::vector<double> &dsol);
+        void stateFarField(std::vector<double> const &sol, std::vector<Vector3d> const &field, double alpha, Vector3d const &CoG, bool bFuseMi, bool bSideslipModel,
+                           Vector3d &Force, Vector3d &Moment);
+        /** The local onset velocities (m/s) of a steady rotating point, per panel, that inducedForce() applies at the strips; empty for a point without rates. */
+        void setOnset(std::vector<Vector3d> const &field) {m_Onset=field;}
+        void clearOnset() {m_Onset.clear();}
+
         void midWakePoint(const Panel3 *pWakePanel, Vector3d &midleft, Vector3d &midright) const;
         void trailingWakePoint(const Panel3 *pWakePanel, Vector3d &left, Vector3d &right) const;
         void trailingWakePanels(const Panel3 *pWakePanel, Panel3 &p3WU, Panel3 &p3WD) const;
@@ -132,6 +145,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
 
     protected:
+        std::vector<Vector3d> m_Onset;              /**< the velocity of the air relative to each panel's centroid, m/s, of the steady rotating point being solved (setOnset()); empty for a point without rates */
         std::vector<char> m_RowSkip;                /**< the panels left out of the yawed wake's product, set by yawedWakeProduct() */
         std::vector<int> m_Component;               /**< the connected piece (wing) of each panel, set by yawedWakeProduct() */
         double m_WakeClearance = 0.0;               /**< the distance from a wake column within which another wing's panels are left out of the yawed wake's product, set by yawedWakeProduct() */

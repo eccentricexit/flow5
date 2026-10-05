@@ -99,6 +99,7 @@ void SpanDistribs::resizeResults(int NStation)
     m_FPressure.resize(NStation);        std::fill(m_FPressure.begin(),  m_FPressure.end(),        Vector3d());
     m_PtLE.resize(NStation);             std::fill(m_PtLE.begin(),       m_PtLE.end(),             Vector3d());
     m_Vd.resize(NStation);               std::fill(m_Vd.begin(),         m_Vd.end(),               Vector3d());
+    m_VOnset.clear();
 }
 
 

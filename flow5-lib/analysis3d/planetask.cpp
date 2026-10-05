@@ -43,6 +43,7 @@
 
 #include <planetask.h>
 
+#include <api.h>
 #include <geom_params.h>
 #include <mesh_globals.h>
 #include <objects2d.h>
@@ -1495,6 +1496,12 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
         Mi = AF.Mi();
     }
 
+    if(m_bRatePoint)
+    {
+        // a rotating point with sideslip: the far field of the sideslip derivatives' model replaces that of the plain wake, see solveRatePoint()
+        Force += m_dForceRate;
+        Mi    += m_dMomentRate;
+    }
     m_AF.setFff(Force);          // N/q, body axes
     m_AF.setMi(Mi);
 
@@ -2114,6 +2121,8 @@ bool PlaneTask::T123458Loop()
 
     traceStdLog("\nSolving the problem... \n\n");
 
+    if(!checkRatePoints()) return false;     // points with body rates: thin triangle methods only, refused before any matrix is made
+
     m_pPA->m_nStations = m_pPlane->nStations();// for assertion checks only?
 
     m_pPA->makeWakePanels(objects::windDirection(0,0), false);
@@ -2150,6 +2159,13 @@ bool PlaneTask::T123458Loop()
 
         if(!t8opp.isActive()) continue;
         m_qRHS = io;
+
+        // a point with body rates is a steady rotating state: solved at its own speed, with the local onset flow (solveRatePoint());
+        // the other points are solved at unit speed and scaled
+        bool const bRates = t8opp.hasRates();
+        m_bRatePoint = bRates;
+        for(SpanDistribs &sd : m_SpanDistFF) sd.m_VOnset.clear();
+        if(m_pP3A) m_pP3A->clearOnset();
         m_Alpha = t8opp.alpha();
         m_Beta  = t8opp.beta();
         m_Phi   = m_pPlPolar->phi();
@@ -2160,6 +2176,7 @@ bool PlaneTask::T123458Loop()
         outstring += ALPHAstr + std::format("={:g}", m_Alpha) + DEGstr + ", ";
         outstring += BETAstr  + std::format("={:g}", m_Beta)  + DEGstr + ", ";
         outstring += PHIstr   + std::format("={:g}", m_Phi)   + DEGstr + ", ";
+        if(bRates) outstring += std::format("p={:g} q={:g} r={:g} rad/s, ", t8opp.p(), t8opp.q(), t8opp.r());
 
         if(m_pPlPolar->isType1() || m_pPlPolar->isType4() || m_pPlPolar->isType5() || m_pPlPolar->isType8())
             outstring += "V" + INFstr + std::format("={:g} ", m_QInf*Units::mstoUnit()) + Units::speedUnitLabel() + EOLstr;
@@ -2168,6 +2185,17 @@ bool PlaneTask::T123458Loop()
 
         traceStdLog(outstring);
 
+        if(bRates)
+        {
+            traceStdLog("       Calculating the steady rotating state and its far field forces...\n");
+            if(!solveRatePoint(t8opp, CoG, m_pPlPolar->bFuseMi()))
+            {
+                traceStdLog("\n          Error solving the steady rotating state... discarding\n\n");
+                continue;
+            }
+        }
+        else
+        {
         if(!m_pPlPolar->isVLM())
         {
             traceStdLog("       Creating source strengths...\n");
@@ -2187,6 +2215,7 @@ bool PlaneTask::T123458Loop()
         computeInducedForces(m_Alpha, m_Beta, 1.0);
 
         computeInducedDrag(  m_Alpha, m_Beta, 1.0);
+        }
 
 
         if(m_pPlPolar->isType1() || m_pPlPolar->isType5())
@@ -2219,6 +2248,13 @@ bool PlaneTask::T123458Loop()
 
         if(m_QInf<0) continue;
 
+        // the unit velocity fields are restored whether or not they are used below: a rotating point has overwritten them
+        m_pPA->m_uVLocal = uVLocal;
+        m_pPA->m_vVLocal = vVLocal;
+        m_pPA->m_wVLocal = wVLocal;
+
+        if(!bRates)     // a rotating point has done all this in solveRatePoint(), at its own speed
+        {
         scaleResultsToSpeed(1.0, m_QInf);
 
         if (isCancelled()) return true;
@@ -2229,22 +2265,21 @@ bool PlaneTask::T123458Loop()
         std::fill(VInf.begin(), VInf.end(), objects::windDirection(m_Alpha, m_Beta));
 
         // Save a little time by restoring the unit velocty fields instead of recalculating them
-        m_pPA->m_uVLocal = uVLocal;
-        m_pPA->m_vVLocal = vVLocal;
-        m_pPA->m_wVLocal = wVLocal;
-
         m_pPA->combineLocalVelocities(m_Alpha, m_Beta, VLocal);
         m_pPA->computeOnBodyCp(VInf, VLocal, m_pPA->m_Cp);
         if (isCancelled()) return true;
+        }
 
         str = "       Calculating plane\n";
         traceStdLog(str);
         PlaneOpp *pPOpp = computePlane(m_Ctrl, m_Alpha, m_Beta, m_pPlPolar->phi(), m_QInf, mass, CoG, false);
+        m_bRatePoint = false;
         if(!pPOpp)
         {
             traceStdLog("\n          Error generating the operating point... discarding\n\n");
             continue;
         }
+        if(bRates) pPOpp->setRates(Vector3d(t8opp.p(), t8opp.q(), t8opp.r()));
 
         if (isCancelled()) return true;
 
@@ -2265,6 +2300,119 @@ bool PlaneTask::T123458Loop()
     }
 
     return true;
+}
+
+
+/**
+ * Refuses the type-8 points with body rates that the steady rotating state does not model: it is made for thin surfaces of the triangle methods (TRIUNIFORM,
+ * TRILINEAR), with a straight wake along the body x axis, no fuselage, no ground effect and no vorton wake. Thick surfaces, VLM and quads would give wrong numbers
+ * without saying so: the solution is not computed at all.
+ */
+bool PlaneTask::checkRatePoints()
+{
+    bool bRates = false;
+    for(T8Opp const &t8opp : m_T8Opps)
+        if(t8opp.isActive() && t8opp.hasRates()) bRates = true;
+    if(!bRates) return true;
+
+    std::string reason;
+    if(!m_pPlPolar->isType8())                      reason = "only type-8 polars have body rates";
+    else if(!m_pPlPolar->isTriangleMethod())        reason = "the steady rotating state is not modelled by the quad methods (VLM1, VLM2, QUADS): use TRIUNIFORM or TRILINEAR";
+    else if(!m_pPlPolar->bThinSurfaces())           reason = "the steady rotating state is not modelled on thick surfaces: use thin surfaces";
+    else if(!m_pPlane->isXflType())                 reason = "the steady rotating state is made for planes of wings";
+    else if(m_pPlane->hasFuse())                    reason = "the steady rotating state is not modelled with a fuselage";
+    else if(m_pPlPolar->bGroundEffect())            reason = "the steady rotating state is not modelled with ground effect";
+    else if(m_pPolar3d->bVortonWake())              reason = "the steady rotating state has a straight wake: no vorton wake";
+    else if(!m_pP3A)                                reason = "the steady rotating state needs a triangle analysis";
+    if(reason.empty()) return true;
+
+    std::string msg = "type-8 points with body rates (p, q, r) are refused: " + reason;
+    traceStdLog("   Error: " + msg + "\n");
+    globals::pushToLog(msg);     // for the API's callers: the run has no operating point, and this is why
+    m_bError = true;
+    return false;
+}
+
+
+/**
+ * Solves the steady rotating state of a type-8 point with body rates (thin surfaces, TRIUNIFORM and TRILINEAR) and prepares the operating point: the doublet strengths,
+ * the on-body pressure coefficients and the far-field strip forces, at the point's own speed (nothing is scaled afterwards).
+ *
+ * The plane flies at the angle of attack and the sideslip of the point, and turns at (p, q, r) about its CoG, in stability axes: p about the axis along the flight path
+ * projected on the plane of symmetry (positive right wing down), q about y (nose up), r about the downward axis (nose to the right). The air flows past the
+ * point r at V + (r-CoG) x Omega (V the velocity of the air relative to the CoG, Omega the plane's rotation vector): the rotation of the free stream that the stability
+ * derivatives p, q, r perturb. The doublet solution is the combination of the unit solutions of u, v, w, p, q and r that the factorised matrix already has. The wake
+ * stays straight along the body x axis, the model of the polar and of the rate derivatives (a helical wake is a later refinement).
+ *
+ * Each strip's far-field force is the Kutta-Joukowski force of its circulation with the onset flow at its trailing panel, plus the Trefftz-plane force: forces() and
+ * inducedForce() do the same, so a point with small rates differs from the point without by the rate derivatives times the rates. The strips' Cl and Re and the viscous
+ * drag use that onset: its speed (SpanDistribs::m_VOnset), as AVL does.
+ *
+ * A point with sideslip is the sum of the parts of the derivatives: the sideslip part follows the model of the sideslip derivatives (uav#79: the wake leaves along the free
+ * stream, to first order; the Trefftz plane of the far field is perpendicular to it; the free-stream force of the sheet is on its vorticity), the rate part the lumped
+ * rule of the rate derivatives. With the states E (no sideslip, no rates) and A (sideslip, no rates) of the plain model and D and B of the sideslip model, the far-field
+ * force and moment of the plain model at the point change by (B-D) - (A-E), which computePlane() adds. For a point without sideslip the change is zero.
+ */
+bool PlaneTask::solveRatePoint(T8Opp const &t8opp, Vector3d const &CoG, bool bFuseMi)
+{
+    P3Analysis *pPA = m_pP3A;
+    if(!pPA) return false;
+
+    double const alpha = t8opp.alpha(), beta = t8opp.beta(), Q = t8opp.Vinf();
+    double const cosa = cos(alpha*PI/180.0), sina = sin(alpha*PI/180.0);
+
+    // the stability axes in geometry axes, as in the derivatives
+    Vector3d is(-cosa, 0.0, -sina), js(0.0, 1.0, 0.0), ks(sina, 0.0, -cosa);
+    Vector3d Omega = is*t8opp.p() + js*t8opp.q() + ks*t8opp.r();       // rad/s, geometry axes
+    Vector3d wd = objects::windDirection(alpha, beta);
+    Vector3d V = wd * Q;                                               // m/s
+
+    std::vector<double> sol, solBeta;   // the state, and the same state without the rotation
+    pPA->makeStateSolution(V, Omega, CoG, sol);
+
+    m_dForceRate.set(0.0, 0.0, 0.0);
+    m_dMomentRate.set(0.0, 0.0, 0.0);
+    double const qDyn = 0.5*m_pPlPolar->density()*Q*Q;
+
+    if(fabs(beta)>0.0)
+    {
+        // the sideslip model, to first order in the wake's yaw theta (the lateral part of the flow direction), on the reference state (alpha, no sideslip, no rotation)
+        double const theta = wd.y;
+        Vector3d V0 = objects::windDirection(alpha, 0.0) * Q;
+        std::vector<double> sol0, dsol;
+        pPA->makeStateSolution(V0, Vector3d(), CoG, sol0);
+        if(!pPA->makeYawedWakeCorrection(sol0, dsol))
+        {
+            traceStdLog("       Error: the yawed wake's influence could not be made\n");
+            return false;
+        }
+        pPA->makeStateSolution(V, Vector3d(), CoG, solBeta);
+        for(unsigned int i=0; i<sol.size(); i++)
+        {
+            sol[i]     += theta * dsol[i];
+            solBeta[i] += theta * dsol[i];
+        }
+
+        std::vector<Vector3d> field0(pPA->nPanels(), V0), fieldB(pPA->nPanels(), V);
+        Vector3d FE, ME, FA, MA, FD, MD, FB, MB;
+        pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, false, FE, ME);    // plain model, no sideslip
+        pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, false, FA, MA);    // plain model, sideslip (yawed wake's circulation)
+        pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, true,  FD, MD);    // sideslip model, no sideslip
+        pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, true,  FB, MB);    // sideslip model, sideslip
+        m_dForceRate  = ((FB-FD) - (FA-FE)) * (1.0/qDyn);     // N/q
+        m_dMomentRate = ((MB-MD) - (MA-ME)) * (1.0/qDyn);     // N.m/q
+    }
+
+    std::vector<Vector3d> field;
+    pPA->makeOnsetField(V, Omega, CoG, field);
+    pPA->makeSourceStrengths(field);     // none on thin surfaces
+    pPA->setStateDoublets(sol);
+    pPA->makeStateCp(sol, field, Q, alpha);
+    pPA->setOnset(field);
+
+    computeInducedForces(alpha, beta, Q);
+    computeInducedDrag(alpha, beta, Q);
+    return !isCancelled();
 }
 
 
@@ -2657,7 +2805,7 @@ bool PlaneTask::computeViscousDrag(WingXfl *pWing, double alpha, double beta, do
     SpanDistribs &sd = SpanResFF;
 
     sd.m_Re.clear();
-    for (int m=0; m<pWing->nStations(); m++)  sd.m_Re.push_back(SpanResFF.m_Chord.at(m) * QInf /pWPolar->viscosity());
+    for (int m=0; m<pWing->nStations(); m++)  sd.m_Re.push_back(SpanResFF.m_Chord.at(m) * QInf * SpanResFF.speedRatio(m) /pWPolar->viscosity());   // the strip's own speed if the plane turns
 
     int m=0;// wing station counter
     for (int j=0; j<pWing->nSurfaces(); j++)
@@ -2743,6 +2891,7 @@ bool PlaneTask::computeViscousDrag(WingXfl *pWing, double alpha, double beta, do
 
             //add the moment of the strip's viscous drag
             Vector3d dragvector = winddirection * (sd.m_PCd.at(m) * sd.m_StripArea.at(m));          //N/q
+            if(!sd.m_VOnset.empty()) dragvector = sd.flowDirection(m, winddirection) * (sd.m_PCd.at(m) * sd.m_StripArea.at(m) * sd.speedRatio(m)*sd.speedRatio(m));   // along the local flow, at its dynamic pressure
             Vector3d leverarmcog = sd.m_PtC4.at(m) - cog;   // m
             sd.m_CmViscous[m] =  (leverarmcog * dragvector).dot(windside);   // N.m/q
             sd.m_CmViscous[m] *= 1.0/sd.m_Chord.at(m)/sd.m_StripArea.at(m);
@@ -2953,7 +3102,7 @@ bool PlaneTask::computeViscousDragOTF(WingXfl *pWing, double alpha, double beta,
 
     for (int m=0; m<pWing->nStations(); m++)
     {
-        SpanResFF.m_Re[m] = SpanResFF.m_Chord.at(m) * QInf /pWPolar->viscosity();
+        SpanResFF.m_Re[m] = SpanResFF.m_Chord.at(m) * QInf * SpanResFF.speedRatio(m) /pWPolar->viscosity();   // the strip's own speed if the plane turns
     }
 
     double theta(0);
@@ -3003,6 +3152,7 @@ bool PlaneTask::computeViscousDragOTF(WingXfl *pWing, double alpha, double beta,
             {
                 //add the moment of the strip's viscous drag
                 Vector3d dragvector = winddirection * (sd.m_PCd.at(m) * sd.m_StripArea.at(m));          //N/q
+                if(!sd.m_VOnset.empty()) dragvector = sd.flowDirection(m, winddirection) * (sd.m_PCd.at(m) * sd.m_StripArea.at(m) * sd.speedRatio(m)*sd.speedRatio(m));   // along the local flow, at its dynamic pressure
                 Vector3d leverarmcog = sd.m_PtC4.at(m) - cog;   // m
                 sd.m_CmViscous[m] =  (leverarmcog * dragvector).dot(windside);   // N.m/q
                 sd.m_CmViscous[m] *= 1.0/sd.m_Chord.at(m)/sd.m_StripArea.at(m);
