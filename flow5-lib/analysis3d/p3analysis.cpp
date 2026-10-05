@@ -885,12 +885,21 @@ void P3Analysis::inducedForce(int nPanel3, double QInf, double alpha, double bet
             SpanResFF.m_Gamma[m] = gMid;
 
             Vector3d vtx = p3.trailingVortex();
-            StripForce = VInf * vtx;
+            // a steady rotating point: the strip's force is the one of the local onset flow at its trailing panel, as in forces() (m_Onset, m/s)
+            Vector3d const &VStrip = m_Onset.empty() ? VInf : m_Onset.at(index);
+            StripForce = VStrip * vtx;
             StripForce *= gMid * m_pPolar3d->density();     // N
             StripForce *=  1.0/q;      // N/q
 
             SpanResFF.m_Cl[m]  = StripForce.dot(surfacenormal) /SpanResFF.stripArea(m);
             SpanResFF.m_F[m]   = StripForce * q;                        // N, body axes
+            if(!m_Onset.empty())
+            {
+                // the strip's Cl is the one of its own dynamic pressure, which is what its section sees (the station Cl of the stall check, XFoil's Cl and Re)
+                if(int(SpanResFF.m_VOnset.size())!=int(SpanResFF.m_F.size())) SpanResFF.m_VOnset.assign(SpanResFF.m_F.size(), Vector3d());
+                SpanResFF.m_VOnset[m] = VStrip * (1.0/QInf);
+                SpanResFF.m_Cl[m] /= SpanResFF.m_VOnset[m].dot(SpanResFF.m_VOnset[m]);
+            }
 
             m++;
         }
@@ -1803,5 +1812,101 @@ void P3Analysis::combineLocalVelocities(double alpha, double beta, std::vector<V
 }
 
 
+/**
+ * The doublet solution (in the space of the right-hand sides: one value per panel for TRIUNIFORM, per vertex for TRILINEAR) of the steady state in which the air
+ * flows past the plane's CoG at V (m/s) while the plane turns at Omega (rad/s), both in geometry axes: the onset at a point r is V + (r-CoG) x Omega,
+ * the apparent air velocity of a plane that rotates (computeAngularDerivatives() builds its p, q and r perturbations from the same unit solutions).
+ * The unit rotation solutions take their lever arm about the polar's CoG: a CoG elsewhere is a uniform velocity, which goes with V.
+ */
+void P3Analysis::makeStateSolution(Vector3d const &V, Vector3d const &Omega, Vector3d const &CoG, std::vector<double> &sol) const
+{
+    Vector3d Vc = V + (m_pPolar3d->CoG() - CoG) * Omega;
+    sol.resize(m_uRHS.size());
+    for(unsigned int i=0; i<sol.size(); i++)
+    {
+        sol[i]  = Vc.x    * m_uRHS[i] + Vc.y    * m_vRHS[i] + Vc.z    * m_wRHS[i];
+        sol[i] += Omega.x * m_pRHS[i] + Omega.y * m_qRHS[i] + Omega.z * m_rRHS[i];
+    }
+}
 
 
+/** The onset velocity at each panel's centroid, V + (r-CoG) x Omega, in m/s, geometry axes */
+void P3Analysis::makeOnsetField(Vector3d const &V, Vector3d const &Omega, Vector3d const &CoG, std::vector<Vector3d> &field) const
+{
+    field.resize(nPanels());
+    for(int i3=0; i3<nPanels(); i3++)
+        field[i3] = V + (m_Panel3.at(i3).CoG() - CoG) * Omega;
+}
+
+
+/** Sets the doublet strengths of the analysis (3 per panel) from a solution in the space of the right-hand sides */
+void P3Analysis::setStateDoublets(std::vector<double> const &sol)
+{
+    if(m_pPolar3d->isTriUniformMethod()) makeVertexDoubletDensities(sol, m_Mu);
+    else                                 std::copy(sol.begin(), sol.end(), m_Mu.begin());
+}
+
+
+/**
+ * The on-body Cp of a steady state (m_Cp), per panel the local onset flow's: Cp = 1-V^2/Vlocal^2. Rescaled to the free-stream dynamic pressure of QInf, so that the
+ * panel forces come out in N/q like those of a point without rates (a thin panel's force, the jump in velocity times the onset, does not depend on the
+ * reference of the pressure).
+ */
+void P3Analysis::makeStateCp(std::vector<double> const &sol, std::vector<Vector3d> const &field, double QInf, double alpha)
+{
+    std::vector<double> none(sol.size(), 0.0);
+    makeLocalVelocities(sol, none, none, m_uVLocal, m_vVLocal, m_wVLocal, objects::windDirection(alpha, 0.0));
+    computeOnBodyCp(field, m_uVLocal, m_Cp);
+    for(int i3=0; i3<nPanels(); i3++)
+    {
+        double ratio2 = field.at(i3).dot(field.at(i3))/(QInf*QInf);
+        for(int k=0; k<3; k++) m_Cp[3*i3+k] *= ratio2;
+    }
+}
+
+
+/**
+ * dsol = -A^-1 (dA_wake/dtheta) sol0: the first-order change of the doublet solution of the state sol0 when the wake, which leaves the trailing edges along the body x axis,
+ * is yawed by theta (rad, positive towards +y) as it is along a sideslipped free stream: mu(theta) = mu_linear + theta dsol. This is the wake part of the
+ * sideslip model of the derivatives (uav#79, computeTranslationDerivatives()). Returns false if the wake's matrix product could not be made.
+ */
+bool P3Analysis::makeYawedWakeCorrection(std::vector<double> const &sol0, std::vector<double> &dsol)
+{
+    if(!yawedWakeProduct(1.0e-2, sol0, dsol)) return false;
+    for(double &d : dsol) d = -d;
+    return backSubRHS(dsol);
+}
+
+
+/**
+ * The far-field force (N) and the moment about the CoG (N.m) of a state, as the derivatives evaluate them: the moment of the far-field strip forces lumped at the strips'
+ * quarter-chord points plus the strips' own chordwise loads, which is the pressure moment with the leading-edge force that the panels miss (forces(): Moment).
+ * With bSideslipModel the state is evaluated by the sideslip model of the v derivatives (uav#79): the Trefftz plane of the far field is perpendicular to the onset
+ * flow, whose direction is that of the first panel's, and the free-stream force of the doublet sheet is put on the sheet's vorticity instead of at the quarter points
+ * (the chordwise loads stay). It sets m_Cp.
+ */
+void P3Analysis::stateFarField(std::vector<double> const &sol, std::vector<Vector3d> const &field, double alpha, Vector3d const &CoG, bool bFuseMi, bool bSideslipModel,
+                               Vector3d &Force, Vector3d &Moment)
+{
+    std::vector<double> none(sol.size(), 0.0);
+    std::vector<double> mu3(3*nPanels());
+    if(m_pPolar3d->isTriUniformMethod()) makeVertexDoubletDensities(sol, mu3);
+    else                                 std::copy(sol.begin(), sol.end(), mu3.begin());
+    std::vector<double> sigma(nPanels(), 0.0);   // thin surfaces: no sources
+
+    makeLocalVelocities(sol, none, none, m_uVLocal, m_vVLocal, m_wVLocal, objects::windDirection(alpha, 0.0));
+    computeOnBodyCp(field, m_uVLocal, m_Cp);
+
+    bool bFarField = m_bFarField;
+    m_bFarField = true;
+    m_bSideslipFarField = bSideslipModel;
+    m_bSideslipVorticity = bSideslipModel;
+    Vector3d dummyForce, dummyMoment;
+    forces(mu3.data(), sigma.data(), alpha, 0.0, CoG, bFuseMi, field, dummyForce, dummyMoment);
+    m_bFarField = bFarField;
+    m_bSideslipFarField = false;
+    m_bSideslipVorticity = false;
+
+    Force  = m_ForceFF;
+    Moment = m_MomentFF + m_MomentLocal;
+}

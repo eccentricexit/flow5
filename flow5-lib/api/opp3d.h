@@ -129,6 +129,11 @@ class FL5LIB_EXPORT Opp3d : public XflObject
         double beta() const {return m_Beta;}
         void setBeta(double b) {m_Beta=b;}
 
+        /** The steady body rates (p, q, r) in rad/s about the CoG, in stability axes, of a type-8 point with rates: (0,0,0) for every other point. Not archived in the .fl5 file. */
+        Vector3d const &rates() const {return m_Rates;}
+        void setRates(Vector3d const &pqr) {m_Rates=pqr;}
+        bool hasRates() const {return m_Rates.x!=0.0 || m_Rates.y!=0.0 || m_Rates.z!=0.0;}
+
         double phi() const {return m_Phi;}
         void setPhi(double f) {m_Phi=f;}
 
@@ -158,6 +163,7 @@ class FL5LIB_EXPORT Opp3d : public XflObject
 
         double m_Alpha;            /**< the angle of attack*/
         double m_Beta;             /**< the sideslip angle */
+        Vector3d m_Rates;          /**< the steady body rates (p, q, r), rad/s, stability axes; 0 unless a type-8 point sets them */
         double m_Phi;              /**< the bank angle */
         double m_Ry;               /**< The rotation around the y-axis, special for windsurfs */
         double m_Ctrl;             /**< the value of the control variable */

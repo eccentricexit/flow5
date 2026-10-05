@@ -619,12 +619,16 @@ bool XflScriptReader::readPlaneAnalysisData()
         }
         else if(name().compare(QString("T8_Range"), Qt::CaseInsensitive)==0)
         {
-            double vmin=0, vmax=0, vinc=0;
+            // alpha, beta, Vinf and, optionally, the steady body rates p, q, r (rad/s, stability axes): a type-8 point is not a range
+            double vmin=0, vmax=0, vinc=0, p=0, q=0, r=0;
             QStringList oppoint = readElementText().simplified().split(",");
             if(oppoint.length()>0) vmin = oppoint.at(0).toDouble();
             if(oppoint.length()>1) vmax = oppoint.at(1).toDouble();
             if(oppoint.length()>2) vinc = oppoint.at(2).toDouble();
-            m_T8Range.push_back({true, vmin, vmax, vinc});
+            if(oppoint.length()>3) p = oppoint.at(3).toDouble();
+            if(oppoint.length()>4) q = oppoint.at(4).toDouble();
+            if(oppoint.length()>5) r = oppoint.at(5).toDouble();
+            m_T8Range.push_back({true, vmin, vmax, vinc, p, q, r});
         }
         else if(name().compare(QString("Viscous_Loop"), Qt::CaseInsensitive)==0)
         {

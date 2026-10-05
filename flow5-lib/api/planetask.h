@@ -90,6 +90,8 @@ class FL5LIB_EXPORT PlaneTask : public Task3d
 
     private:
         bool T123458Loop();
+        bool checkRatePoints();
+        bool solveRatePoint(T8Opp const &t8opp, Vector3d const &CoG, bool bFuseMi);
         bool T6Loop();
         bool T7Loop();
 
@@ -143,6 +145,9 @@ class FL5LIB_EXPORT PlaneTask : public Task3d
 
         std::vector<double> m_AngleList, m_T6CtrlList, m_T7CtrlList;   /**< The list of operating points to analyze for each polar type*/
         std::vector<T8Opp> m_T8Opps;
+        bool m_bRatePoint = false;          /**< true while a type-8 point with body rates is computed: computePlane() then adds m_dForceRate and m_dMomentRate */
+        Vector3d m_dForceRate;              /**< the change of the far-field force (N/q, body axes) that the sideslip model of the derivatives (uav#79) makes to a rotating point with sideslip */
+        Vector3d m_dMomentRate;             /**< the same for the moment about the CoG (N.m/q) */
 
         std::vector<SpanDistribs> m_SpanDistFF; /**< the array of span distributions of the wings */
         std::vector<Vector3d> m_WingForce;   /**< The array of calculated resulting forces acting on the wings in wind axis (N/q) */

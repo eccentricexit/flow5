@@ -2014,7 +2014,7 @@ void WingXfl::panel3ComputeStrips(std::vector<Panel3> const &panel3list, PlanePo
 
     // Calculate the Reynolds number on each strip
     SpanResSum.m_Re.clear();
-    for (int m=0; m<m_NStation; m++) SpanResSum.m_Re.push_back(SpanResSum.m_Chord.at(m) * QInf /pWPolar->viscosity());
+    for (int m=0; m<m_NStation; m++) SpanResSum.m_Re.push_back(SpanResSum.m_Chord.at(m) * QInf * SpanResSum.speedRatio(m) /pWPolar->viscosity());   // the strip's own speed if the plane turns
 
     double const qDyn = 0.5*pWPolar->density()*QInf*QInf;
     SpanResSum.m_FPressure.resize(m_NStation);
@@ -2164,6 +2164,7 @@ void WingXfl::computeViscousForces(PlanePolar const *pWPolar, double alpha, doub
     for (int m=0; m<m_NStation; m++)
     {
         Vector3d dragvector =  winddirection * SpanResFF.m_PCd.at(m) * SpanResFF.m_StripArea.at(m);    // N/q
+        if(!SpanResFF.m_VOnset.empty()) dragvector = SpanResFF.flowDirection(m, winddirection) * SpanResFF.m_PCd.at(m) * SpanResFF.m_StripArea.at(m) * SpanResFF.speedRatio(m)*SpanResFF.speedRatio(m);   // along the local flow, at its dynamic pressure
         Fv += dragvector;
         Vector3d stripleverarm = SpanResFF.m_PtC4.at(m)-pWPolar->CoG();    // N.m/q
         Mv += stripleverarm * dragvector;

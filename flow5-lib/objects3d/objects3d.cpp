@@ -186,20 +186,35 @@ void Objects3d::insertPlaneOpp(PlaneOpp *pPOpp)
                     }
                     case xfl::T8POLAR:
                     {
-                        // Type 8 analysis, sort by alpha then beta then QInf
+                        // Type 8 analysis, sort by alpha then beta then QInf then the body rates (p, q, r)
                         if(fabs(pPOpp->alpha() - pOldPOpp->alpha())<0.0005)
                         {
                             if(fabs(pPOpp->beta() - pOldPOpp->beta())<0.0005)
                             {
                                 if(fabs(pPOpp->QInf() - pOldPOpp->QInf())<0.0005)
                                 {
-                                    //replace the existing point
-                                    pPOpp->setTheStyle(pOldPOpp->theStyle());
+                                    // the same state only if the rates are the same: a straight and a turning point at one (alpha, beta, QInf) are two points
+                                    double const rn[3] = {pPOpp->rates().x, pPOpp->rates().y, pPOpp->rates().z};
+                                    double const ro[3] = {pOldPOpp->rates().x, pOldPOpp->rates().y, pOldPOpp->rates().z};
+                                    int cmp = 0;
+                                    for(int k=0; k<3 && cmp==0; k++)
+                                        if(fabs(rn[k]-ro[k])>1.e-9) cmp = rn[k]<ro[k] ? -1 : 1;
+                                    if(cmp==0)
+                                    {
+                                        //replace the existing point
+                                        pPOpp->setTheStyle(pOldPOpp->theStyle());
 
-                                    s_oaPlaneOpp.erase(s_oaPlaneOpp.begin()+i);
-                                    delete pOldPOpp;
-                                    s_oaPlaneOpp.insert(s_oaPlaneOpp.begin()+i, pPOpp);
-                                    return;
+                                        s_oaPlaneOpp.erase(s_oaPlaneOpp.begin()+i);
+                                        delete pOldPOpp;
+                                        s_oaPlaneOpp.insert(s_oaPlaneOpp.begin()+i, pPOpp);
+                                        return;
+                                    }
+                                    else if(cmp<0)
+                                    {
+                                        //insert point
+                                        s_oaPlaneOpp.insert(s_oaPlaneOpp.begin()+i, pPOpp);
+                                        return;
+                                    }
                                 }
                                 else if (pPOpp->QInf() < pOldPOpp->QInf())
                                 {

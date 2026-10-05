@@ -51,6 +51,11 @@ struct FL5LIB_EXPORT SpanDistribs
 
         int nStations() const {return int(m_Cl.size());}
 
+        /** |V|/QInf at the strip: the local speed over the free-stream speed, 1 unless the point rotates (a type-8 point with body rates) */
+        double speedRatio(int m) const {return m<int(m_VOnset.size()) ? m_VOnset.at(m).norm() : 1.0;}
+        /** The unit vector along the local velocity at the strip, or `freestream` unless the point rotates */
+        Vector3d flowDirection(int m, Vector3d const &freestream) const {return m<int(m_VOnset.size()) ? m_VOnset.at(m)*(1.0/m_VOnset.at(m).norm()) : freestream;}
+
     public:
         std::vector<double> m_Ai;            /**< the induced angles, in degrees */
         std::vector<double> m_Alpha_0;       /**< the zero-lift angle at the span station */
@@ -81,6 +86,7 @@ struct FL5LIB_EXPORT SpanDistribs
         std::vector<double> m_StripArea;     /**< the area of each chordwise strip */
         std::vector<double> m_StripPos;       /**< the span positions of the stations */
         std::vector<Vector3d> m_PtC4;        /**< the quarter chord points */
+        std::vector<Vector3d> m_VOnset;      /**< the velocity of the air relative to the strip's trailing panel (free stream plus the plane's rotation), over the free-stream speed, with body rates only: then m_Re, m_Cl and the viscous drag are those of the local speed. Empty otherwise. */
         std::vector<Vector3d> m_PtLE;        /**< the midpoints of the strips' leading edges, on the panel mesh. Set by the triangle methods for thin surfaces only. */
 };
 
