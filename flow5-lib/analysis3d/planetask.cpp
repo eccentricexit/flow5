@@ -2163,7 +2163,8 @@ bool PlaneTask::T123458Loop()
         // a point with body rates is a steady rotating state: solved at its own speed, with the local onset flow (solveRatePoint());
         // the other points are solved at unit speed and scaled
         bool const bRates = t8opp.hasRates();
-        m_bRatePoint = bRates;
+        bool const bSlip = !bRates && t8opp.beta()!=0.0 && sideslipModelApplies();
+        m_bRatePoint = bRates || bSlip;
         for(SpanDistribs &sd : m_SpanDistFF) sd.m_VOnset.clear();
         if(m_pP3A) m_pP3A->clearOnset();
         m_Alpha = t8opp.alpha();
@@ -2196,6 +2197,7 @@ bool PlaneTask::T123458Loop()
         }
         else
         {
+        if(bSlip) m_slipSol.clear();
         if(!m_pPlPolar->isVLM())
         {
             traceStdLog("       Creating source strengths...\n");
@@ -2209,6 +2211,19 @@ bool PlaneTask::T123458Loop()
 
         m_pPA->makeUnitDoubletStrengths(m_Alpha, m_Beta);
 
+        if(bSlip)
+        {
+            // thin triangle surfaces: the sideslip model of the derivatives, as for the points with rates (at unit speed here; the results are scaled below)
+            traceStdLog("       Applying the sideslip model...\n");
+            m_pP3A->makeStateSolution(objects::windDirection(m_Alpha, m_Beta), Vector3d(), CoG, m_slipSol);
+            if(!applySideslipModel(m_Alpha, m_Beta, 1.0, CoG, m_pPlPolar->bFuseMi(), m_slipSol))
+            {
+                traceStdLog("\n          Error applying the sideslip model... discarding\n\n");
+                m_bRatePoint = false;
+                continue;
+            }
+            m_pP3A->setStateDoublets(m_slipSol);
+        }
 
         traceStdLog("       Calculating far field forces...\n");
 
@@ -2265,8 +2280,16 @@ bool PlaneTask::T123458Loop()
         std::fill(VInf.begin(), VInf.end(), objects::windDirection(m_Alpha, m_Beta));
 
         // Save a little time by restoring the unit velocty fields instead of recalculating them
+        if(bSlip)
+        {
+            // the solution carries the yawed wake's change: its local velocities are not a combination of the unit ones
+            m_pP3A->makeStateCp(m_slipSol, VInf, 1.0, m_Alpha);
+        }
+        else
+        {
         m_pPA->combineLocalVelocities(m_Alpha, m_Beta, VLocal);
         m_pPA->computeOnBodyCp(VInf, VLocal, m_pPA->m_Cp);
+        }
         if (isCancelled()) return true;
         }
 
@@ -2335,6 +2358,59 @@ bool PlaneTask::checkRatePoints()
 
 
 /**
+ * Whether the points with sideslip follow the sideslip model of the derivatives (uav#79, flow5#23, applySideslipModel()): thin surfaces of the triangle methods on planes of
+ * wings without a fuselage, ground effect or vorton wake. Thick surfaces, VLM and the rest keep the older model of the polar.
+ */
+bool PlaneTask::sideslipModelApplies() const
+{
+    return m_pP3A && m_pPlPolar->isTriangleMethod() && m_pPlPolar->bThinSurfaces() && m_pPlane->isXflType() && !m_pPlane->hasFuse()
+           && !m_pPlPolar->bGroundEffect() && !m_pPolar3d->bVortonWake();
+}
+
+
+/**
+ * The sideslip model of the derivatives (uav#79) for a point with sideslip beta at speed Q, with or without rates: the wake leaves along the free stream, to first order in
+ * its yaw theta (the lateral part of the flow direction): sol, the doublet solution of the point, takes theta times the first-order change of the circulation. The far-field
+ * force and moment of the plain model (the Trefftz plane perpendicular to the body x axis, the free-stream force of the sheet at the strips' quarter points) change by
+ * (B-D) - (A-E), with E (no sideslip) and A (sideslip, with the yawed wake's circulation) the states of the plain model and D and B the same two with the model of the
+ * sideslip derivatives (Trefftz plane perpendicular to the free stream, the free-stream force of the sheet on its vorticity): m_dForceRate and m_dMomentRate (N/q,
+ * N.m/q, body axes), which computePlane() adds. The change is a first-order function of beta alone, so a point with rates tending to 0 tends to the point without.
+ */
+bool PlaneTask::applySideslipModel(double alpha, double beta, double Q, Vector3d const &CoG, bool bFuseMi, std::vector<double> &sol)
+{
+    P3Analysis *pPA = m_pP3A;
+    Vector3d wd = objects::windDirection(alpha, beta);
+    Vector3d V = wd * Q;
+    double const theta = wd.y;
+    double const qDyn = 0.5*m_pPlPolar->density()*Q*Q;
+    Vector3d V0 = objects::windDirection(alpha, 0.0) * Q;
+    std::vector<double> sol0, dsol, solBeta;
+    pPA->makeStateSolution(V0, Vector3d(), CoG, sol0);
+    if(!pPA->makeYawedWakeCorrection(sol0, dsol))
+    {
+        traceStdLog("       Error: the yawed wake's influence could not be made\n");
+        return false;
+    }
+    pPA->makeStateSolution(V, Vector3d(), CoG, solBeta);
+    for(unsigned int i=0; i<sol.size(); i++)
+    {
+        sol[i]     += theta * dsol[i];
+        solBeta[i] += theta * dsol[i];
+    }
+
+    std::vector<Vector3d> field0(pPA->nPanels(), V0), fieldB(pPA->nPanels(), V);
+    Vector3d FE, ME, FA, MA, FD, MD, FB, MB;
+    pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, false, FE, ME);    // plain model, no sideslip
+    pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, false, FA, MA);    // plain model, sideslip (yawed wake's circulation)
+    pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, true,  FD, MD);    // sideslip model, no sideslip
+    pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, true,  FB, MB);    // sideslip model, sideslip
+    m_dForceRate  = ((FB-FD) - (FA-FE)) * (1.0/qDyn);     // N/q
+    m_dMomentRate = ((MB-MD) - (MA-ME)) * (1.0/qDyn);     // N.m/q
+    return true;
+}
+
+
+/**
  * Solves the steady rotating state of a type-8 point with body rates (thin surfaces, TRIUNIFORM and TRILINEAR) and prepares the operating point: the doublet strengths,
  * the on-body pressure coefficients and the far-field strip forces, at the point's own speed (nothing is scaled afterwards).
  *
@@ -2348,7 +2424,7 @@ bool PlaneTask::checkRatePoints()
  * inducedForce() do the same, so a point with small rates differs from the point without by the rate derivatives times the rates. The strips' Cl and Re and the viscous
  * drag use that onset: its speed (SpanDistribs::m_VOnset), as AVL does.
  *
- * A point with sideslip is the sum of the parts of the derivatives: the sideslip part follows the model of the sideslip derivatives (uav#79: the wake leaves along the free
+ * (A point with sideslip follows applySideslipModel(), shared with the points without rates.) A point with sideslip is the sum of the parts of the derivatives: the sideslip part follows the model of the sideslip derivatives (uav#79: the wake leaves along the free
  * stream, to first order; the Trefftz plane of the far field is perpendicular to it; the free-stream force of the sheet is on its vorticity), the rate part the lumped
  * rule of the rate derivatives. With the states E (no sideslip, no rates) and A (sideslip, no rates) of the plain model and D and B of the sideslip model, the far-field
  * force and moment of the plain model at the point change by (B-D) - (A-E), which computePlane() adds. For a point without sideslip the change is zero.
@@ -2367,41 +2443,12 @@ bool PlaneTask::solveRatePoint(T8Opp const &t8opp, Vector3d const &CoG, bool bFu
     Vector3d wd = objects::windDirection(alpha, beta);
     Vector3d V = wd * Q;                                               // m/s
 
-    std::vector<double> sol, solBeta;   // the state, and the same state without the rotation
+    std::vector<double> sol;
     pPA->makeStateSolution(V, Omega, CoG, sol);
 
     m_dForceRate.set(0.0, 0.0, 0.0);
     m_dMomentRate.set(0.0, 0.0, 0.0);
-    double const qDyn = 0.5*m_pPlPolar->density()*Q*Q;
-
-    if(fabs(beta)>0.0)
-    {
-        // the sideslip model, to first order in the wake's yaw theta (the lateral part of the flow direction), on the reference state (alpha, no sideslip, no rotation)
-        double const theta = wd.y;
-        Vector3d V0 = objects::windDirection(alpha, 0.0) * Q;
-        std::vector<double> sol0, dsol;
-        pPA->makeStateSolution(V0, Vector3d(), CoG, sol0);
-        if(!pPA->makeYawedWakeCorrection(sol0, dsol))
-        {
-            traceStdLog("       Error: the yawed wake's influence could not be made\n");
-            return false;
-        }
-        pPA->makeStateSolution(V, Vector3d(), CoG, solBeta);
-        for(unsigned int i=0; i<sol.size(); i++)
-        {
-            sol[i]     += theta * dsol[i];
-            solBeta[i] += theta * dsol[i];
-        }
-
-        std::vector<Vector3d> field0(pPA->nPanels(), V0), fieldB(pPA->nPanels(), V);
-        Vector3d FE, ME, FA, MA, FD, MD, FB, MB;
-        pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, false, FE, ME);    // plain model, no sideslip
-        pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, false, FA, MA);    // plain model, sideslip (yawed wake's circulation)
-        pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, true,  FD, MD);    // sideslip model, no sideslip
-        pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, true,  FB, MB);    // sideslip model, sideslip
-        m_dForceRate  = ((FB-FD) - (FA-FE)) * (1.0/qDyn);     // N/q
-        m_dMomentRate = ((MB-MD) - (MA-ME)) * (1.0/qDyn);     // N.m/q
-    }
+    if(fabs(beta)>0.0 && !applySideslipModel(alpha, beta, Q, CoG, bFuseMi, sol)) return false;
 
     std::vector<Vector3d> field;
     pPA->makeOnsetField(V, Omega, CoG, field);
