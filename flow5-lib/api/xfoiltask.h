@@ -122,7 +122,9 @@ class FL5LIB_EXPORT XFoilTask
         bool ReSequence();
         void addXFoilData(OpPoint *pOpp, XFoil &xfoil, const Foil *pFoil);
 
-        bool processClRange(Polar *pPolar, const AnalysisRange &range);
+        bool solveStrip(double Cl, double Re);
+        bool solveStripAlpha(double alphadeg, double Re);
+        bool matchCl(double Cl, double Re);
 
 
     private:
