@@ -27,6 +27,7 @@
 //https://developercommunity.visualstudio.com/t/Visual-Studio-17100-Update-leads-to-Pr/10669759?sort=newest
 //#define _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR
 
+#include <cmath>
 #include <cstring>
 #include <format>
 
@@ -165,31 +166,21 @@ bool XFoilTask::initialize(Foil &foil, Polar *pPolar, bool bKeepOpps)
 }
 
 
-/** Fallback for 3d OTF calculations at unconverged span spations */
-bool XFoilTask::processCl(int k)
+/** One strip of a 3d OTF calculation: XFoil at the given Cl and Re from the boundary layer as it stands.
+ *  True when the solution converged with a Cd that is not spurious (a converged Cd below s_CdError is an XFoil artefact: no strip has that little profile drag). */
+bool XFoilTask::solveStrip(double Cl, double Re)
 {
-    std::string str;
-
-    traceStdLog("   Initializing BL\n");
-    m_XFoilInstance.lblini = false;
-    m_XFoilInstance.lipan = false;
-
-
     m_XFoilInstance.lalfa = false;
     m_XFoilInstance.alfa = 0.0;
     m_XFoilInstance.qinf = 1.0;
-    m_XFoilInstance.clspec = m_pPolar->m_Cl.at(k);
+    m_XFoilInstance.clspec = Cl;
 
-    m_XFoilInstance.reinf1 = m_pPolar->m_Re.at(k);
+    m_XFoilInstance.reinf1 = Re;
     m_XFoilInstance.minf1  = 0.0;
 
-
-    str = std::format("   Re={:g}  Cl={:g} ", m_pPolar->m_Re.at(k), m_pPolar->m_Cl.at(k));
-    traceStdLog(str);
     if(!m_XFoilInstance.speccl())
     {
-        str = "Invalid Analysis Settings\nCpCalc: local speed too large\n Compressibility corrections invalid";
-        traceStdLog(str);
+        traceStdLog("Invalid Analysis Settings\nCpCalc: local speed too large\n Compressibility corrections invalid");
         m_bErrors = true;
         return false;
     }
@@ -197,140 +188,138 @@ bool XFoilTask::processCl(int k)
     m_XFoilInstance.lwake = false;
     m_XFoilInstance.lvconv = false;
 
-    int iterations = loop();
-    (void)iterations;
+    loop();
 
-    if(m_XFoilInstance.lvconv)
+    return m_XFoilInstance.lvconv && m_XFoilInstance.cd>=s_CdError;
+}
+
+
+/** XFoil at a given angle of attack (degrees) and Re, from the boundary layer as it stands: the fixed-alpha mode, which keeps converging where the fixed-Cl mode does not
+ *  (laminar bubbles, the fold of the lift curve). True when converged with a Cd that is not spurious; the lift is then m_XFoilInstance.cl. */
+bool XFoilTask::solveStripAlpha(double alphadeg, double Re)
+{
+    m_XFoilInstance.alfa = alphadeg * PI/180.0;
+    m_XFoilInstance.lalfa = true;
+    m_XFoilInstance.qinf = 1.0;
+    m_XFoilInstance.reinf1 = Re;
+    m_XFoilInstance.minf1  = 0.0;
+
+    if(!m_XFoilInstance.specal())
     {
-//        str = std::format("   ...converged after {:3d} iterations / Cl={:5f}  Cd={:5f}\n", iterations, m_XFoilInstance.cl, m_XFoilInstance.cd);
-//        traceStdLog(str);
-        // repurposing control variable to contain convergence result
-        m_pPolar->m_Control[k] = m_XFoilInstance.lvconv ? 1.0 : -1.0;
-        m_pPolar->m_Cd[k]      = m_XFoilInstance.cd;
-        m_pPolar->m_XTrTop[k]  = m_XFoilInstance.xoctr[1];
-        m_pPolar->m_XTrBot[k]  = m_XFoilInstance.xoctr[2];
+        m_bErrors = true;
+        return false;
+    }
+
+    m_XFoilInstance.lwake = false;
+    m_XFoilInstance.lvconv = false;
+
+    loop();
+
+    return m_XFoilInstance.lvconv && m_XFoilInstance.cd>=s_CdError;
+}
+
+
+/** The strip's own Cl in the fixed-alpha mode: the angle is stepped from well below zero lift toward the strip's Cl (boundary layer carried along) until two converged neighbours bracket it,
+ *  then closed in on it by false position. True when a converged solution within CLTOL of the strip's Cl is in the XFoil instance. */
+bool XFoilTask::matchCl(double Cl, double Re)
+{
+    double const CLTOL = 2.0e-3;
+    double const step = 0.5;
+    double const sgn = Cl>=0.0 ? 1.0 : -1.0;
+
+    initializeBL();
+    bool havePrev = false;
+    double aPrev(0), cPrev(0), aLo(0), cLo(0), aHi(0), cHi(0);
+    bool bracket = false;
+
+    for(int i=0; i<=60 && !s_bCancel; i++)
+    {
+        double a = sgn * (-6.0 + step*i);
+        if(!solveStripAlpha(a, Re))
+        {
+            initializeBL();
+            havePrev = false;
+            continue;
+        }
+        double c = m_XFoilInstance.cl;
+        if(fabs(c-Cl)<CLTOL) return true;
+        if(havePrev && (cPrev-Cl)*(c-Cl)<0.0)
+        {
+            aLo = aPrev; cLo = cPrev; aHi = a; cHi = c;
+            bracket = true;
+            break;
+        }
+        havePrev = true; aPrev = a; cPrev = c;
+        if(sgn*(c-Cl)>0.0) return false; // beyond the strip's Cl without a converged neighbour before it
+    }
+    if(!bracket) return false;
+
+    for(int it=0; it<16 && !s_bCancel; it++)
+    {
+        double a = aLo + (Cl-cLo)/(cHi-cLo)*(aHi-aLo);
+        if(it%3==2) a = 0.5*(aLo+aHi); // bisect now and then: false position can creep
+        if(!solveStripAlpha(a, Re)) return false;
+        double c = m_XFoilInstance.cl;
+        if(fabs(c-Cl)<CLTOL) return true;
+        if((c-Cl)*(cLo-Cl)>0.0) {aLo = a; cLo = c;}
+        else                    {aHi = a; cHi = c;}
+    }
+    return false;
+}
+
+
+/** Fallback for 3d OTF calculations at unconverged span stations.
+ *  The strip is solved again from a boundary layer that is built up on the way: a Cl ramp from the attached state at zero lift (two step sizes), a Re ramp from higher Re at the
+ *  strip's own Cl, then the fixed-alpha mode closed in on the strip's Cl (`matchCl`).
+ *  Only a solution at the strip's own Cl and Re counts. A strip that no attempt solves stays unconverged (Control -1, Cd 0) and the operating point is discarded by the caller:
+ *  nothing is interpolated from other Cl or other points, and nothing is kept at a zero Cd. */
+bool XFoilTask::processCl(int k)
+{
+    double const Cl = m_pPolar->m_Cl.at(k);
+    double const Re = m_pPolar->m_Re.at(k);
+
+    auto clRamp = [&](double step)
+    {
+        initializeBL();
+        int n = std::max(1, int(std::ceil(fabs(Cl)/step)));
+        for(int i=1; i<=n; i++)
+        {
+            if(s_bCancel) return false;
+            if(!solveStrip(Cl*double(i)/double(n), Re)) return false;
+        }
+        return true;
+    };
+
+    auto reRamp = [&]()
+    {
+        initializeBL();
+        for(double f : {4.0, 2.0, 1.4, 1.0})
+        {
+            if(s_bCancel) return false;
+            if(!solveStrip(Cl, Re*f)) return false;
+        }
+        return true;
+    };
+
+    traceStdLog(std::format("   Re={:g}  Cl={:g} fallback\n", Re, Cl));
+
+    bool bOK = clRamp(0.1) || clRamp(0.03) || reRamp() || matchCl(Cl, Re);
+
+    // repurposing control variable to contain convergence result
+    m_pPolar->m_Control[k] = bOK ? 1.0 : -1.0;
+    if(bOK)
+    {
+        m_pPolar->m_Cd[k]     = m_XFoilInstance.cd;
+        m_pPolar->m_XTrTop[k] = m_XFoilInstance.xoctr[1];
+        m_pPolar->m_XTrBot[k] = m_XFoilInstance.xoctr[2];
     }
     else
     {
-//        str = std::format("   ...unconverged after {:d} iterations\n", iterations);
-//        traceStdLog(str);
-
-        // final fallback: build a polar to try an interpolation
-        Polar temppolar(*m_pPolar);
-
-        // define a wide range
-        AnalysisRange range;
-        range.m_bActive = true;
-        range.m_vInc = 0.05;
-
-        double ClMin(0), ClMax(0);
-        if(m_pPolar->m_Cl.at(k)>0)
-        {
-            ClMin = -0.1;
-            ClMax = m_pPolar->m_Cl.at(k) +0.1;
-            range.m_vStart = ClMin;
-            range.m_vEnd = ClMax;
-        }
-        else
-        {
-            ClMin = m_pPolar->m_Cl.at(k) -0.1;
-            ClMax = 0.1;
-            range.m_vStart = ClMax;
-            range.m_vEnd = ClMin;
-        }
-
-        // launch the sequence
-        processClRange(&temppolar, range);
-
-        // interpolate
-        bool bOutCl = false;
-        m_pPolar->m_Cd[k]     = temppolar.interpolateFromCl(m_pPolar->m_Cl.at(k), Polar::CD,     bOutCl);
-        m_pPolar->m_XTrTop[k] = temppolar.interpolateFromCl(m_pPolar->m_Cl.at(k), Polar::XTRTOP, bOutCl);
-        m_pPolar->m_XTrBot[k] = temppolar.interpolateFromCl(m_pPolar->m_Cl.at(k), Polar::XTRBOT, bOutCl);
-        // repurposing control variable to contain convergence result
-        m_pPolar->m_Control[k] = !bOutCl ? 1.0 : -1.0;
+        m_pPolar->m_Cd[k] = 0.0; // unconverged: the caller discards the point
+        initializeBL();
     }
-
-    return m_pPolar->m_Control[k]>0.0;
+    return bOK;
 }
-
-
-/** specific to OTF calculations */
-bool XFoilTask::processClRange(Polar *pPolar, AnalysisRange const &range)
-{
-    initializeBL();
-
-    int iter=0;
-    double SpMin = range.m_vStart;
-    double SpMax = range.m_vEnd;
-    double SpInc = fabs(range.m_vInc);
-    if(SpMax<SpMin) SpInc = -SpInc;
-
-    double Cl = SpMin;
-
-    do
-    {
-        if(s_bCancel) break;
-
-        m_XFoilInstance.lalfa = false;
-        m_XFoilInstance.alfa = 0.0;
-        m_XFoilInstance.qinf = 1.0;
-        m_XFoilInstance.clspec = Cl;
-
-        if(!m_XFoilInstance.speccl())
-        {
-            m_bErrors = true;
-            return false;
-        }
-
-        m_XFoilInstance.lwake = false;
-        m_XFoilInstance.lvconv = false;
-
-        loop();
-
-        if(m_XFoilInstance.lvconv)
-        {
-            if(m_XFoilInstance.cd<s_CdError)
-            {
-//                discarding operating point with spurious Cd;
-            }
-            else
-            {
-                OpPoint *pOpPoint = new OpPoint;
-                addXFoilData(pOpPoint, m_XFoilInstance, m_pFoil);
-                pOpPoint->setFoilName(m_pFoil->name());
-                pOpPoint->setPolarName(m_pPolar->name());
-                pOpPoint->setTheStyle(m_pPolar->theStyle());
-                pOpPoint->setTheta(m_pPolar->TEFlapAngle());
-                pOpPoint->setPolarType(pPolar->type());
-
-                pPolar->addOpPointData(pOpPoint); // store the data on the fly; a polar is only used by one task at a time
-                delete pOpPoint;
-            }
-        }
-        else
-        {
-            initializeBL();
-            m_bErrors = true;
-        }
-
-        Cl       += SpInc;
-
-        if(SpMin<=SpMax)
-        {
-            if(Cl>SpMax+CLPRECISION) break;
-        }
-        else
-        {
-            if(Cl<SpMax-CLPRECISION) break;
-        }
-
-        if(fabs(SpInc)<CLPRECISION) break;
-    } while(iter++<1000); // failsafe limit
-
-    return true;
-}
-
 
 
 /** Tailored for 3d OTF calculations */
@@ -371,10 +360,11 @@ bool XFoilTask::processClList()
         int iterations = loop();
 
 
-        // repurposing control variable to contain convergence result
-        m_pPolar->m_Control[icl] = m_XFoilInstance.lvconv ? 1.0 : -1.0;
+        // repurposing control variable to contain convergence result; a converged Cd below s_CdError is spurious (no strip has that little profile drag): the fallback takes it
+        bool const bConverged = m_XFoilInstance.lvconv && m_XFoilInstance.cd>=s_CdError;
+        m_pPolar->m_Control[icl] = bConverged ? 1.0 : -1.0;
 
-        if(m_XFoilInstance.lvconv)
+        if(bConverged)
         {
             str = std::format("   ...converged after {:d} iterations / Cl={:5f}  Cd={:5f}\n", iterations, m_XFoilInstance.cl, m_XFoilInstance.cd);
             traceStdLog(str);
