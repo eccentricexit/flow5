@@ -1284,14 +1284,15 @@ bool gl3dXPlaneView::glMakeStreamLines(const std::vector<Panel3> &panel3list, st
         m_pP3UniAnalysis->initializeAnalysis(s_pXPlane->curPlPolar(),0);
         m_pP3UniAnalysis->setTriMesh(s_pXPlane->curPlane()->triMesh());
         m_pP3UniAnalysis->setVortons(pPOpp->m_Vorton);
+        m_pP3UniAnalysis->makeWakePanels(Vector3d(1.0, 0.0, 0.0), s_pXPlane->curPlPolar()->bVortonWake());
     }
     else if(s_pXPlane->curPlPolar()->isTriLinearMethod())
     {
         m_pP3LinAnalysis->initializeAnalysis(s_pXPlane->curPlPolar(),0);
         m_pP3LinAnalysis->setTriMesh(s_pXPlane->curPlane()->triMesh());
         m_pP3LinAnalysis->setVortons(pPOpp->m_Vorton);
+        m_pP3LinAnalysis->makeWakePanels(Vector3d(1.0, 0.0, 0.0), s_pXPlane->curPlPolar()->bVortonWake());
     }
-    m_pP3UniAnalysis->makeWakePanels(Vector3d(1.0, 0.0, 0.0), s_pXPlane->curPlPolar()->bVortonWake());
 
 
     // multithreaded mode only
