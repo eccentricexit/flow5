@@ -1851,6 +1851,12 @@ void TriMesh::appendMesh(TriMesh const &mesh)
         p3.setNodeIndexes(p3.nodeIndex(0)+n0, p3.nodeIndex(1)+n0, p3.nodeIndex(2)+n0);
         for(int ine=0; ine<3; ine++)            if(p3.neighbour(ine)>=0) p3.m_Neighbour[ine] += np0; // only if not equal to -1
 //            if(p3.neighbour(ine)>=0) p3.setNeighbour(ine, p3.neighbour(ine) + np0); // only if not equal to -1
+
+        // the panel links are panel indexes: shift them like the neighbours
+        if(p3.m_iPL>=0) p3.m_iPL += np0;
+        if(p3.m_iPR>=0) p3.m_iPR += np0;
+        if(p3.m_iPU>=0) p3.m_iPU += np0;
+        if(p3.m_iPD>=0) p3.m_iPD += np0;
     }
 }
 
