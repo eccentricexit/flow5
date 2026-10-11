@@ -210,6 +210,7 @@ void PlanePolar::insertPOppDataAt(int pos, PlaneOpp const *pPOpp)
     m_EV[pos].m_EV[5] = pPOpp->m_EigenValue[5];
     m_EV[pos].m_EV[6] = pPOpp->m_EigenValue[6];
     m_EV[pos].m_EV[7] = pPOpp->m_EigenValue[7];
+    m_EV[pos].setVectors(pPOpp->m_EigenVector);
 
     //make room for computed values
 
