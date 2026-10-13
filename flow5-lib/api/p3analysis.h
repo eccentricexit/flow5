@@ -124,6 +124,10 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         double stripArea(const Panel3 &p3, bool bThinSurfaces) const;
         int nextTopTrailingPanelIndex(const Panel3 &p3) const;
         Vector3d stripQuarterPoint(Panel3 const &p3) const;
+        bool stripSuctionFrame(Panel3 const &p3, Vector3d &n, Vector3d &e, Vector3d &t, Vector3d &d, Vector3d &ptLE) const;
+        Vector3d stripSuctionCorrection(Panel3 const &p3, Vector3d const &F, Vector3d const &FP) const;
+        void stateSuctionChange(std::vector<double> const &sol, std::vector<Vector3d> const &field, Vector3d const &V, double alpha, Vector3d const &CoG,
+                                bool bFuseMi, Vector3d &dForce, Vector3d &dMoment);
 
         // Steady rotating states, for the type-8 points with body rates (thin triangle methods; see PlaneTask::T123458Loop()). A state is the onset flow V + (r-CoG) x Omega
         // (V the velocity of the air relative to the plane's CoG, Omega its rotation vector, both in geometry axes), solved with the unit solutions of u, v, w, p, q and r.

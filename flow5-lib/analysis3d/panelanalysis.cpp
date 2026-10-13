@@ -70,6 +70,7 @@ PanelAnalysis::PanelAnalysis()
     m_bWarning     = false;
     m_bFarField = false;
     m_bSideslipVorticity = false;
+    m_bRotationSuction = false;
     m_pWakeProduct = nullptr;
     m_pWakeMu = nullptr;
 
@@ -976,6 +977,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     // moment carries the panel method's own residual (a spurious drag that turns with the rotation), which put Cnr 20 to 30 percent
     // above AVL's and TRILINEAR's Cmq 20 percent below it (issue #7 item 5)
     m_bFarField = true;
+    m_bRotationSuction = true;     // rotating states: the strips' suction perpendicular to the leading edge (flow5#28)
 
     double rotationrate = 0.01;         //  rad/s for difference estimation
 
@@ -1174,6 +1176,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     SD.Lr = (Momentp-Momentm).dot(is) /rotationrate/2.0;
     SD.Nr = (Momentp-Momentm).dot(ks) /rotationrate/2.0;
     m_bFarField = false;
+    m_bRotationSuction = false;
 }
 
 /** Sets the vortons from a pre-calculated PlaneOpp.

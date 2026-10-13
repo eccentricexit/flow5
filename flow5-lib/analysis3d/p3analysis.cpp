@@ -598,6 +598,125 @@ Vector3d P3Analysis::stripQuarterPoint(Panel3 const &p3) const
 }
 
 
+/**
+ * The frame of a strip's leading-edge suction (flow5#28), from its trailing panel (the mid panel of a thin strip, the bottom one of a thick strip):
+ * n the normal of the mean surface at the leading edge (thin: the leading panel's; thick: the difference of the normals of the top and bottom panels
+ * that meet at the leading edge), e = n x x the span direction in that plane, t = e x n the chordwise direction, d = n x l_LE the direction in that
+ * plane perpendicular to the strip's leading-edge segment l_LE, and ptLE the midpoint of that segment. False for a degenerate strip.
+ */
+bool P3Analysis::stripSuctionFrame(Panel3 const &p3, Vector3d &n, Vector3d &e, Vector3d &t, Vector3d &d, Vector3d &ptLE) const
+{
+    Panel3 const *pLast = &p3;
+    while(pLast->m_iPU>=0)
+    {
+        Panel3 const &p3k = m_Panel3.at(pLast->m_iPU);
+        if(p3k.isTopPanel()) break;
+        pLast = &p3k;
+    }
+
+    // the leading nodes of the last panel, see Panel3::leadingEdgeMidpoint()
+    int iA=0, iB=1;
+    if(pLast->isMidPanel())
+    {
+        if(pLast->isLeftWingPanel()) {iA=0; iB=2;}
+        else                         {iA=1; iB=2;}
+        n = pLast->normal();
+    }
+    else
+    {
+        if(pLast->m_iPU<0) return false;
+        n = m_Panel3.at(pLast->m_iPU).normal() - pLast->normal();
+    }
+    Vector3d lLE = pLast->vertexAt(iB) - pLast->vertexAt(iA);
+    ptLE = (pLast->vertexAt(iA) + pLast->vertexAt(iB)) * 0.5;
+
+    if(n.norm()<1.0e-9) return false;
+    n.normalize();
+    e = n * Vector3d(1.0, 0.0, 0.0);
+    if(e.norm()<1.0e-6) return false;     // a surface facing the x axis has no leading edge to speak of
+    e.normalize();
+    t = e * n;
+    d = n * lLE;
+    if(d.norm()<1.0e-9) return false;
+    d.normalize();
+    return fabs(d.dot(t))>1.0e-6;
+}
+
+
+/**
+ * The change of a strip's force F (N) that directs its leading-edge suction perpendicular to the leading edge (flow5#28).
+ *
+ * In thin-wing theory the force on a lifting surface is the pressure, normal to the surface, plus the leading-edge suction, which lies in the plane of
+ * the surface at the leading edge and is perpendicular to the leading edge (Polhamus, NASA TN D-3767, 1966; Lan, J. Aircraft 11(9), 1974; Katz and
+ * Plotkin, Low-Speed Aerodynamics, 2nd ed., 2001, sec. 12.4). The strip's Kutta-Joukowski force rho Gamma V x l_TE has the right lift and chordwise
+ * force but is perpendicular to the trailing edge: where the trailing edge is swept differently from the leading edge (a tapered or elliptic
+ * planform, a twisted wing) its component along the span is wrong, and so are the side force of a rolling or yawing wing and its yawing moment.
+ *
+ * The strip's force is kept along n (the normal force) and t (the chordwise force); along e it becomes that of the panel pressures FP (N), which
+ * follow the real surface, its twist and dihedral included, plus that of the leading-edge force F - FP, whose component in the plane (the suction)
+ * is made perpendicular to the leading edge with its chordwise component unchanged:
+ *     F.e  ->  FP.e + ((F-FP).t) (d.e)/(d.t)
+ * Nothing is chosen along the chord. Thick strips take the same: their pressures carry most of the suction, in its own direction; the rest, the
+ * difference between the far-field and the pressure force, is directed as the suction. Returns the change, along e.
+ * forces() applies it in rotating states only (m_bRotationSuction): without rotation the strips' far-field force is exact in total.
+ */
+Vector3d P3Analysis::stripSuctionCorrection(Panel3 const &p3, Vector3d const &F, Vector3d const &FP) const
+{
+    Vector3d n, e, t, d, ptLE;
+    if(!stripSuctionFrame(p3, n, e, t, d, ptLE)) return Vector3d();
+    double r = d.dot(e)/d.dot(t);
+    double Fe = FP.dot(e) + (F-FP).dot(t)*r;
+    return e * (Fe - F.dot(e));
+}
+
+
+/**
+ * The change that the strips' leading-edge suction (stripSuctionCorrection()) makes to the far-field force (N) and to the on-body moment (N.m, about
+ * the CoG; on thin strips the leading-edge force is applied at the leading edge, as in forces()) of a steady rotating state of a polar point
+ * (PlaneTask::solveRatePoint()): the change in the state with the body rates, solution sol and onset field, less the change in the state of the same
+ * free stream V without rates. A state without rotation keeps its far-field force (see forces(), rule 1), so only the part due to the rotation is added,
+ * and a point with small rates differs from the point without by the rate derivatives times the rates, as forces() makes them. With sideslip, sol
+ * and sol0 are the plain solutions, without the yawed wake's change that PlaneTask::applySideslipModel() adds: the two changes are superposed
+ * (forces(), rule 3), exact to first order in beta and the rates.
+ */
+void P3Analysis::stateSuctionChange(std::vector<double> const &sol, std::vector<Vector3d> const &field, Vector3d const &V, double alpha, Vector3d const &CoG,
+                                    bool bFuseMi, Vector3d &dForce, Vector3d &dMoment)
+{
+    dForce.set(0.0, 0.0, 0.0);
+    dMoment.set(0.0, 0.0, 0.0);
+    std::vector<double> sol0;
+    makeStateSolution(V, Vector3d(), CoG, sol0);
+    std::vector<Vector3d> field0(nPanels(), V);
+
+    bool bFarField = m_bFarField, bRotation = m_bRotationSuction;
+    m_bFarField = true;
+    for(int k=0; k<2; k++)
+    {
+        std::vector<double> const &x = k==0 ? sol : sol0;
+        std::vector<Vector3d> const &f = k==0 ? field : field0;
+        std::vector<double> none(x.size(), 0.0);
+        std::vector<double> mu3(3*nPanels());
+        if(m_pPolar3d->isTriUniformMethod()) makeVertexDoubletDensities(x, mu3);
+        else                                 std::copy(x.begin(), x.end(), mu3.begin());
+        std::vector<double> sigma(nPanels(), 0.0);   // thin surfaces: no sources (rotating points are refused on thick surfaces)
+        makeLocalVelocities(x, none, none, m_uVLocal, m_vVLocal, m_wVLocal, objects::windDirection(alpha, 0.0));
+        computeOnBodyCp(f, m_uVLocal, m_Cp);
+
+        Vector3d F, M;
+        m_bRotationSuction = false;
+        forces(mu3.data(), sigma.data(), alpha, 0.0, CoG, bFuseMi, f, F, M);
+        Vector3d FF0 = m_ForceFF, M0 = M;
+        m_bRotationSuction = true;
+        forces(mu3.data(), sigma.data(), alpha, 0.0, CoG, bFuseMi, f, F, M);
+        double sign = k==0 ? 1.0 : -1.0;
+        dForce  += (m_ForceFF - FF0) * sign;
+        dMoment += (M - M0) * sign;
+    }
+    m_bFarField = bFarField;
+    m_bRotationSuction = bRotation;
+}
+
+
 int P3Analysis::nextTopTrailingPanelIndex(Panel3 const &p3) const
 {
     if(!p3.isBotPanel()) return -1;
@@ -1163,6 +1282,9 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
 * (sheetVorticityLoad(), thin surfaces; uav#79): the strips' force V x Gamma l_TE is right as a total (Stokes), but lumps at the quarter point the chordwise
 * vorticity d(mu)/dy between the strips, whose force in a sideslip carries the rolling and yawing moments.
 *
+* In rotating states (m_bRotationSuction) each strip's leading-edge suction is directed perpendicular to the leading edge, in the forces and the moments:
+* without rotation the strips' far-field force is exact in total, with it the near-field force is the reference (flow5#28).
+*
 * m_MomentFF applies each strip's far-field force at the strip's quarter-chord point, so it has no chordwise load. m_MomentLocal is the
 * moment about these points of the strips' own chordwise loads: the panel pressures and, on thin surfaces, the leading-edge force. The
 * pitch damping of a wing needs it, since its load moves along the chord in a pitch rate.
@@ -1196,6 +1318,8 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     std::vector<double> stripG;   // sign of the circulation of a counter-clockwise ring of a unit doublet density, in 4 pi units: the sideslip vorticity's orientation
     std::vector<bool> stripThin;
     std::vector<int> stripOfPanel(nPanels(), -1);
+    std::vector<Vector3d> stripNF;   // the strips' near-field forces (N), which Force sums
+    std::vector<int> stripTP;        // the strips' trailing panels (mid panel, or bottom panel of a thick strip)
 
     // The far-field velocity of the strips is the one of the polar's induced force (trefftzDrag): the analytic Trefftz plane perpendicular to the wake sheet,
     // from the trailing legs of every strip of every surface for this solution; half of it is the velocity at the bound vortex. It does not depend on the
@@ -1242,6 +1366,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 stripforce  =  Wg * vortex;
                 stripforce *= GammaStrip * m_pPolar3d->density();     // N
                 Force += stripforce;
+                Vector3d nearforce = stripforce;
 
                 // the strip's far-field force: the Kutta-Joukowski lift plus the
                 // Trefftz-plane force, evaluated at the mid-wake point as in trefftzDrag;
@@ -1283,6 +1408,8 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                     stripFP.push_back(Vector3d());
                     stripThin.push_back(true);
                     stripG.push_back(ringOrientation(p3, vortex) * 4.0*PI);
+                    stripNF.push_back(nearforce);
+                    stripTP.push_back(i3);
                 }
 
  //               m++;
@@ -1316,8 +1443,11 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             stripforce *= GammaStrip * m_pPolar3d->density();     // N
 
             Force += stripforce;
+            Vector3d nearforce = stripforce;
 
             // same far-field force as in the mid-panel branch above
+            Vector3d quarterpoint = stripQuarterPoint(p3);
+            stripforce.set(0.0, 0.0, 0.0);
             if(m_bFarField)
             {
                 Vector3d WgFF = trefftzWash(p3);
@@ -1325,26 +1455,27 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 stripforce  = vortex * WgFF;
                 stripforce *= GammaStrip * m_pPolar3d->density();     // N
                 m_ForceFF += stripforce;
-                Vector3d quarterpoint = stripQuarterPoint(p3);
                 m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
-
-                // the panels of the strip: the chain of the iPU links from the bottom trailing panel runs along the bottom surface
-                // and round the leading edge to the top trailing panel
-                int iStrip = int(stripFF.size());
-                Panel3 const *pLast = &p3;
-                stripOfPanel[i3] = iStrip;
-                while(pLast->m_iPU>=0)
-                {
-                    stripOfPanel[pLast->m_iPU] = iStrip;
-                    pLast = &m_Panel3.at(pLast->m_iPU);
-                }
-                stripFF.push_back(stripforce);
-                stripQP.push_back(quarterpoint);
-                stripLE.push_back(quarterpoint);
-                stripFP.push_back(Vector3d());
-                stripThin.push_back(false);
-                stripG.push_back(ringOrientation(m_Panel3.at(idxU), p3.trailingVortex()) * 4.0*PI);   // the ring of the top trailing panel
             }
+
+            // the panels of the strip: the chain of the iPU links from the bottom trailing panel runs along the bottom surface
+            // and round the leading edge to the top trailing panel
+            int iStrip = int(stripFF.size());
+            Panel3 const *pLast = &p3;
+            stripOfPanel[i3] = iStrip;
+            while(pLast->m_iPU>=0)
+            {
+                stripOfPanel[pLast->m_iPU] = iStrip;
+                pLast = &m_Panel3.at(pLast->m_iPU);
+            }
+            stripFF.push_back(stripforce);
+            stripQP.push_back(quarterpoint);
+            stripLE.push_back(quarterpoint);
+            stripFP.push_back(Vector3d());
+            stripThin.push_back(false);
+            stripG.push_back(ringOrientation(m_Panel3.at(idxU), p3.trailingVortex()) * 4.0*PI);   // the ring of the top trailing panel
+            stripNF.push_back(nearforce);
+            stripTP.push_back(i3);
 //            m++;
         }
     }
@@ -1401,6 +1532,36 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     Force += WindDirection*frictiondrag;
 */
     Moment *= m_pPolar3d->density();                          // N.m
+
+    // The leading-edge suction of every strip, thin or thick, perpendicular to the leading edge (stripSuctionCorrection(), flow5#28), in rotating
+    // states only (m_bRotationSuction: the rate derivatives, the steady rotating points). Three rules, each with its basis and its limit:
+    // 1. Rotation only. Basis: with a uniform onset (alpha, beta, controls) the sum of the strips' forces rho Gamma (V + w/2) x l_TE is the
+    //    Trefftz-plane force, exact in total by momentum whatever the direction of each strip's segment; AVL's near-field and Trefftz-plane CY agree
+    //    in a sideslip (-0.0024 and -0.0025 on a wing with 8 deg dihedral) and not in a roll. Applying the change there too moved CL and CD of a
+    //    bell-twisted wing by -0.6 and -3.4 percent and CYb of the dihedral wing 12 percent away from AVL. Limit: momentum is exact only for a
+    //    force-free wake; flow5's wake is the straight one of the polar. A rotating onset V + Omega x r is not uniform, the far field is no longer
+    //    the total, and the near-field force of thin-wing theory is taken.
+    // 2. The change sits where the strip's force sits in each moment: the quarter-chord point in m_MomentFF, the leading-edge force in the pitch
+    //    damping's m_MomentLocal. Basis: m_MomentFF lumps every strip's far-field force there; moving the suction alone to the leading edge, its true
+    //    point of action, turned Cnp/CL positive on swept wings of aspect ratio 1.34 (+0.012 and +0.032 against AVL's -0.018 and -0.058 at 100
+    //    chordwise vortices, the wind tunnel's -0.38 and -0.56). Limit: Cnp and Cnr carry no leading-edge lever for the suction until the
+    //    near-field moment (flow5#29) puts every load where it acts.
+    // 3. Rotation with sideslip (a type-8 point with both): the sideslip's change (PlaneTask::applySideslipModel()) and the rotation's
+    //    (stateSuctionChange()) are each made without the other and added. Limit: superposition, exact to first order; the cross term of beta and
+    //    the rates is left out.
+    if(m_bRotationSuction && m_bFarField)
+    {
+        for(unsigned int is=0; is<stripFF.size(); is++)
+        {
+            Panel3 const &p3 = m_Panel3.at(stripTP[is]);
+            Vector3d FP = stripFP[is] * m_pPolar3d->density();   // N
+            Force += stripSuctionCorrection(p3, stripNF[is], FP);
+            Vector3d dF = stripSuctionCorrection(p3, stripFF[is], FP);
+            m_ForceFF   += dF;
+            stripFF[is] += dF;
+            m_MomentFF  += (stripQP[is] - CoG) * dF;   // N.m
+        }
+    }
 
     // the leading-edge force of the thin strips: what the far field carries and the panel forces do not
     for(unsigned int is=0; is<stripFF.size(); is++)

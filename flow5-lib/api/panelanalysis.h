@@ -222,6 +222,7 @@ class FL5LIB_EXPORT PanelAnalysis
         bool m_bSideslipVorticity;   /**< true while computeTranslationDerivatives() evaluates the sideslip (v) derivatives: forces() then puts the free-stream Kutta-Joukowski force of the doublet sheet's vorticity, chordwise as well as spanwise, at the vortex lines' own positions in m_MomentFF, instead of lumping it at the strips' quarter-chord points (uav#79) */
         std::vector<double> *m_pWakeProduct;   /**< if not null, makeWakeMatrixBlock() does not touch the matrix: it adds each wake entry times m_pWakeMu to this vector (see yawedWakeProduct()) */
         double const *m_pWakeMu;
+        bool m_bRotationSuction;     /**< true while forces() evaluates a rotating state (computeAngularDerivatives(), P3Analysis::stateSuctionChange()): the strips' leading-edge suction is then directed perpendicular to the leading edge and put there (P3Analysis::stripSuctionCorrection(), flow5#28); in a state without rotation the strips' far-field force is exact in total (momentum) and is left as it is */
         bool m_bFarField;            /**< true if forces() should also evaluate the far-field force m_ForceFF and moments m_MomentFF and m_MomentLocal; it is costly, and only the stability and control derivatives (computeTranslationDerivatives(), computeAngularDerivatives(), PlaneTask::computeControlDerivatives()) need it */
 
         xfl::enumAnalysisStatus m_AnalysisStatus;
