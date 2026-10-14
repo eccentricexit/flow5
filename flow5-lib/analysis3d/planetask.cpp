@@ -2688,9 +2688,13 @@ void PlaneTask::computeControlDerivatives(double t7ctrl, double alphaeq, double 
         SD.Xde[ie] = (ForceFF - m_Force0FF).dot(is) / DeltaCtrl;
         SD.Yde[ie] = (Force   - m_Force0  ).dot(js) / DeltaCtrl;
         SD.Zde[ie] = (ForceFF - m_Force0FF).dot(ks) / DeltaCtrl;
-        SD.Lde[ie] = (Moment - m_Moment0).dot(is) / DeltaCtrl;  // N.m/ctrl
-        SD.Mde[ie] = (Moment - m_Moment0).dot(js) / DeltaCtrl;
-        SD.Nde[ie] = (Moment - m_Moment0).dot(ks) / DeltaCtrl;
+        // VLM2: the moment of the near-field load of the lattice (P4Analysis::forces(), rule 2, uav#81): its on-body moment crosses the bound
+        // vortices with the unperturbed wind, so that a control's yaw, the difference of the induced drag of the two sides, was about 0
+        Vector3d const &M  = m_pPlPolar->isVLM2() ? m_pPA->farFieldMoment()          : Moment;
+        Vector3d const &M0 = m_pPlPolar->isVLM2() ? m_pPA->referenceFarFieldMoment() : m_Moment0;
+        SD.Lde[ie] = (M - M0).dot(is) / DeltaCtrl;  // N.m/ctrl
+        SD.Mde[ie] = (M - M0).dot(js) / DeltaCtrl;
+        SD.Nde[ie] = (M - M0).dot(ks) / DeltaCtrl;
     }
 
     m_pPA->setFarField(false);

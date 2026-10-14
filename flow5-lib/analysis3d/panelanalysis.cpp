@@ -71,6 +71,7 @@ PanelAnalysis::PanelAnalysis()
     m_bFarField = false;
     m_bSideslipVorticity = false;
     m_bRotationSuction = false;
+    m_Omega.set(0.0, 0.0, 0.0);
     m_pWakeProduct = nullptr;
     m_pWakeMu = nullptr;
 
@@ -744,6 +745,7 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         mup = m_cRHS.data();
         forces(mup, Sigma.data()+6*N, alpha, beta, CoG, bFuseMi, VField.at(6), Force0, Moment0);
         m_ForceFF0 = m_ForceFF;
+        m_MomentFF0 = m_MomentFF;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -829,12 +831,35 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     alpha = alphaeq;
     if(m_pPolar3d->isQuadMethod())
     {
+        // VLM2: the sideslip model of the thin triangle surfaces below (uav#79), on the vortex lattice (uav#81): the wake's yaw in the circulation
+        // (P4Analysis::yawedWakeProduct(): the trailing legs of the horseshoes), the far-field side force with the Trefftz plane perpendicular to
+        // the yawed wake, and the free-stream force of the rings' chordwise legs in the near-field moment (P4Analysis::forces(), rule 3)
+        bool bSideslipModel = m_pPolar3d->isVLM2();
+        if(bSideslipModel)
+        {
+            std::vector<double> yawProduct;
+            if(deltaspeed<0.1*u0 && yawedWakeProduct(1.0e-2, m_cRHS, yawProduct))
+            {
+                for(double &d : yawProduct) d = -d;
+                backSubRHS(yawProduct);
+                double theta = deltaspeed/u0;
+                for(int i=0; i<int(yawProduct.size()); i++)
+                {
+                    m_VpRHS[i] += theta * yawProduct[i];
+                    m_VmRHS[i] -= theta * yawProduct[i];
+                }
+            }
+            m_bSideslipVorticity = true;
+            m_bSideslipFarField = true;
+        }
         mup = m_VpRHS.data();
         forces(mup, Sigma.data()+1*N, alpha, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
         MomentFFp = m_MomentFF;
         mum = m_VmRHS.data();
         forces(mum, Sigma.data()+4*N, alpha, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
         MomentFFm = m_MomentFF;
+        m_bSideslipVorticity = false;
+        m_bSideslipFarField = false;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -892,7 +917,6 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         m_bSideslipVorticity = false;
         m_bSideslipFarField = false;
     }
-    // The quad methods (VLM2) keep the old lateral model: their on-body moment ignores the direction of the perturbed wind and their legs leave along x (uav#79)
     SD.Yv = (Forcem - Forcep).dot(js)   /deltaspeed/2.0;
     // the on-body pressure moment picks up a spurious response to lateral perturbations (cf. issue #7):
     // the roll and yaw derivatives are based on the moment of the far-field strip forces instead
@@ -1059,11 +1083,14 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     if(m_pPolar3d->isQuadMethod())
     {
         mup = m_UpRHS.data();
+        m_Omega = is*rotationrate;
         forces(mup, Sigma.data()+0*N, alphaeq, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
         Momentp = m_MomentFF;
         mum = m_UmRHS.data();
+        m_Omega = is*(-rotationrate);
         forces(mum, Sigma.data()+3*N, alphaeq, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
         Momentm = m_MomentFF;
+        m_Omega.set(0.0, 0.0, 0.0);
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -1101,13 +1128,16 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     if(m_pPolar3d->isQuadMethod())
     {
         mup = m_VpRHS.data();
+        m_Omega = js*rotationrate;
         forces(mup, Sigma.data()+1*N, alphaeq, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
         ForceFFp = m_ForceFF;
         Momentp = m_MomentFF + m_MomentLocal;
         mum = m_VmRHS.data();
+        m_Omega = js*(-rotationrate);
         forces(mum, Sigma.data()+4*N, alphaeq, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
         ForceFFm = m_ForceFF;
         Momentm = m_MomentFF + m_MomentLocal;
+        m_Omega.set(0.0, 0.0, 0.0);
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
@@ -1142,11 +1172,14 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     if(m_pPolar3d->isQuadMethod())
     {
         mup = m_WpRHS.data();
+        m_Omega = ks*rotationrate;
         forces(mup, Sigma.data()+2*N, alphaeq, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
         Momentp = m_MomentFF;
         mum = m_WmRHS.data();
+        m_Omega = ks*(-rotationrate);
         forces(mum, Sigma.data()+5*N, alphaeq, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
         Momentm = m_MomentFF;
+        m_Omega.set(0.0, 0.0, 0.0);
     }
     else if(m_pPolar3d->isTriangleMethod())
     {

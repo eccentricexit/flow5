@@ -160,6 +160,8 @@ class FL5LIB_EXPORT PanelAnalysis
         void setFarField(bool b) {m_bFarField=b;}
         Vector3d const &farFieldForce() const {return m_ForceFF;}
         Vector3d const &referenceFarFieldForce() const {return m_ForceFF0;}
+        Vector3d const &farFieldMoment() const {return m_MomentFF;}
+        Vector3d const &referenceFarFieldMoment() const {return m_MomentFF0;}
 
         static void setMaxThreadCount(int maxthreads) {s_MaxThreads=maxthreads;}
         static void setDoublePrecision(bool bDouble) {s_bDoublePrecision=bDouble;}
@@ -206,7 +208,9 @@ class FL5LIB_EXPORT PanelAnalysis
 
         Vector3d m_ForceFF;                  /**< The sum of the far-field strip forces, at the mid-wake point as the force of the polar, set by forces() with m_MomentFF; forces() returns the force at the trailing wake point */
         Vector3d m_ForceFF0;                 /**< The far-field force of the reference state of computeTranslationDerivatives(), for the control derivatives */
-        Vector3d m_MomentFF;                 /**< The moment about the CoG of the far-field strip forces, set by forces() */
+        Vector3d m_MomentFF;                 /**< The moment about the CoG of the far-field strip forces, set by forces(); for VLM2 the moment of the near-field load of the vortex lattice (P4Analysis::boundVortexLoad()) */
+        Vector3d m_MomentFF0;                /**< m_MomentFF of the reference state of computeTranslationDerivatives(), for the control derivatives of VLM2 (PlaneTask::computeControlDerivatives()) */
+        Vector3d m_Omega;                    /**< The body rotation of the state forces() evaluates, set by computeAngularDerivatives() and zero otherwise: the onset at a point r is V0 + (r - CoG) x m_Omega. VLM2's near-field load takes it at each vortex segment's own midpoint (P4Analysis::boundVortexLoad()), where the onset of VInf is the one at the panel's centre */
         Vector3d m_MomentLocal;              /**< The moment of each strip's own chordwise load (panel pressures and, on thin surfaces, the leading-edge force) about the strip's quarter-chord point, summed over the strips, set by forces() with m_MomentFF: the load that m_MomentFF, which applies each strip's force at its quarter-chord point, does not have */
 
         std::vector<double> m_Cp;                /**< The array of pressure coefficients on the panels. 1 value/panel in the case of the quad methods, 3 values/panel in the case of the triangular methods */
@@ -219,10 +223,10 @@ class FL5LIB_EXPORT PanelAnalysis
         bool m_bWarning;     /**< true if one the OpPoints could not be properly interpolated */
         bool m_bMatrixError;
         bool m_bSideslipFarField = false;   /**< true while computeTranslationDerivatives() evaluates the sideslip (v) derivatives: the far-field force has its Trefftz plane perpendicular to the free stream, along which the wake leaves (uav#79) */
-        bool m_bSideslipVorticity;   /**< true while computeTranslationDerivatives() evaluates the sideslip (v) derivatives: forces() then puts the free-stream Kutta-Joukowski force of the doublet sheet's vorticity, chordwise as well as spanwise, at the vortex lines' own positions in m_MomentFF, instead of lumping it at the strips' quarter-chord points (uav#79) */
+        bool m_bSideslipVorticity;   /**< true while computeTranslationDerivatives() evaluates the sideslip (v) derivatives: forces() then puts the free-stream Kutta-Joukowski force of the doublet sheet's vorticity, chordwise as well as spanwise, at the vortex lines' own positions in m_MomentFF, instead of lumping it at the strips' quarter-chord points (uav#79); VLM2 adds the free-stream force of its rings' chordwise legs to the near-field load of its bound vortices (uav#81) */
         std::vector<double> *m_pWakeProduct;   /**< if not null, makeWakeMatrixBlock() does not touch the matrix: it adds each wake entry times m_pWakeMu to this vector (see yawedWakeProduct()) */
         double const *m_pWakeMu;
-        bool m_bRotationSuction;     /**< true while forces() evaluates a rotating state (computeAngularDerivatives(), P3Analysis::stateSuctionChange()): the strips' leading-edge suction is then directed perpendicular to the leading edge (P3Analysis::stripSuctionCorrection(), flow5#28), the change kept where the strip's force sits (the quarter-chord point in m_MomentFF) until the near-field moment (flow5#29); in a state without rotation the strips' far-field force is exact in total (momentum) and is left as it is */
+        bool m_bRotationSuction;     /**< true while forces() evaluates a rotating state (computeAngularDerivatives(), P3Analysis::stateSuctionChange()): the strips' leading-edge suction is then directed perpendicular to the leading edge (P3Analysis::stripSuctionCorrection(), flow5#28), the change kept where the strip's force sits (the quarter-chord point in m_MomentFF) until the near-field moment (flow5#29); in a state without rotation the strips' far-field force is exact in total (momentum) and is left as it is. VLM2 returns the near-field force of its bound vortices in a rotating state (P4Analysis::forces(), uav#81) */
         bool m_bFarField;            /**< true if forces() should also evaluate the far-field force m_ForceFF and moments m_MomentFF and m_MomentLocal; it is costly, and only the stability and control derivatives (computeTranslationDerivatives(), computeAngularDerivatives(), PlaneTask::computeControlDerivatives()) need it */
 
         xfl::enumAnalysisStatus m_AnalysisStatus;

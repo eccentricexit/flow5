@@ -95,6 +95,9 @@ class FL5LIB_EXPORT P4Analysis : public PanelAnalysis
 
 
         void forces(double const *Mu, double const *Sigma, double alpha, double beta, Vector3d const&CoG, bool bFuseMi, const std::vector<Vector3d> &VInf, Vector3d &Force, Vector3d &Moment) override;
+        void boundVortexLoad(double const *Mu4, double const *Sigma4, std::vector<Vector3d> const &VInf, Vector3d const &CoG, Vector3d &Force, Vector3d &Moment) const;
+        bool yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product) override;
+        int yawedWakeRowsKept() const {return m_nYawedWakeRowsKept;}
 
         void makeMu(int qrhs) override;
 
@@ -164,6 +167,7 @@ class FL5LIB_EXPORT P4Analysis : public PanelAnalysis
         std::vector<Panel4> m_RefWakePanel4;      /**< a copy of the reference wake node array if wake needs to be reset */
         std::vector<Vector3d> m_WakeNode;	      /**< the current working wake node array */
         std::vector<Vector3d> m_RefWakeNode;      /**< a copy of the reference wake node array if the flat wake geometry needs to be restored */
+        int m_nYawedWakeRowsKept = 0;             /**< the panels yawedWakeProduct() left out (they keep the unyawed wake), set by it */
 };
 
 
