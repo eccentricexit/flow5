@@ -28,6 +28,8 @@
 #include <format>
 #include <thread>
 #include <iostream>
+#include <map>
+#include <tuple>
 
 
 #include <p4analysis.h>
@@ -1001,6 +1003,29 @@ void P4Analysis::VLMGetVortexInfluence(Panel4 const &p4, Vector3d const &C, doub
 /**
 * Calculates the forces using a far-field method.
 * Calculates the moments by a near field method, i.e. direct summation on the panels.
+*
+* VLM2, stability and control derivatives (m_bFarField; uav#81): the on-body moment of the vortices below crosses each bound vortex with
+* the unperturbed wind direction, so a rotation, a control or a sideslip enters it only through the circulation: Cnp, Cnr and the
+* aileron's yaw read about 0, and the side force of the strips lumped at their trailing edges has the wrong sign in a roll where the
+* trailing edge is swept differently from the leading edge. With m_bFarField, m_MomentFF is instead the moment of the near-field load of
+* the lattice (boundVortexLoad()): AVL's model, rho Gamma (V + Omega x r + v) x l on the bound vortices, v the velocity the lattice induces
+* at their midpoints (Drela and Youngren, AVL 3.52, aero.f SFFORC; its trailing legs on the surface carry no force by default, LTRFORCE).
+* Where each load is used, with its basis and its limit:
+* 1. The rate derivatives (m_bRotationSuction): the force and the moment are the near-field load. Basis: the onset V + Omega x r is not
+*    uniform, so the far-field force is not the total; the bound vortices' side force is the leading-edge suction perpendicular to the
+*    leading edge of thin-wing theory, the model the triangle methods take in rotation (flow5#28). Limit: AVL's model; the chordwise legs'
+*    force in a rotation, which AVL leaves out, is left out.
+* 2. The control derivatives' moments (PlaneTask::computeControlDerivatives() takes m_MomentFF for VLM2): an aileron's yaw is the
+*    difference of the induced drag of the two wings, which only the near-field load places. Their forces stay the far-field ones: with a
+*    uniform onset that is exact in total by momentum (AVL's near-field and Trefftz-plane forces agree there).
+* 3. The sideslip derivatives (m_bSideslipVorticity, the model of the triangle methods, uav#79): the wake yawed with the free stream in the
+*    circulation (yawedWakeProduct()), the far-field side force with its Trefftz plane perpendicular to that wake (m_bSideslipFarField), and
+*    in m_MomentFF the free-stream force of the rings' chordwise legs on the sheet added to the near-field load. Limit: the velocity the wake
+*    induces at the bound vortices is the unyawed lattice's, as the triangle methods take the induced part from the Trefftz plane: with the
+*    yawed legs there, Cnb over the classical wing value (NACA TN 1581 eq 21) grew with the aspect ratio, 1.8 at A 10 and 2.1 at A 40
+*    unswept, where it should tend to 1 (1.38 and 1.13 without, the triangle methods 1.30 and 1.08).
+* 4. Nothing else changes: the force returned without rotation, the on-body moment (Cm, the u and w derivatives, the neutral point) and the
+*    polar's own forces are the far-field force and the on-body moment as before.
 * @param Mu a pointer to the array of doublet strengths or vortex circulations
 * @param Sigma a pointer to the array of source strengths
 * @param VInf a reference to the array of the velocity vectors on the panels
@@ -1033,7 +1058,8 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
     // The far-field velocity of the strips is the one of the polar's induced force (trefftzDrag): the analytic Trefftz plane perpendicular to the wake sheet,
     // from the trailing legs of every strip of every surface for this solution; half of it is the velocity at the bound vortex. It does not depend on the
     // length of the wake.
-    Vector3d const wakedir(1.0, 0.0, 0.0);
+    Vector3d wakedir(1.0, 0.0, 0.0);
+    if(m_bSideslipFarField && !VInf.empty() && VInf.front().norm()>0.0) wakedir = VInf.front()/VInf.front().norm();   // the sideslip derivatives' wake leaves along the free stream
     std::vector<TrefftzStrip> trefftzStrips;
     makeTrefftzStrips(Mu4, wakedir, trefftzStrips);
     auto trefftzWash = [&](Vector3d const &a, Vector3d const &b)
@@ -1135,7 +1161,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
     }
 
     //On-Body moment
-    Vector3d VLocal, ForcePt;
+    Vector3d VLocal, ForcePt, FuseMoment;
     Moment.set(0.0,0.0,0.0);
     for(int i4=0; i4<nPanels(); i4++)
     {
@@ -1168,6 +1194,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
         Moment += PanelLeverArm * PanelForce ;                     // N.m/rho
         // the far-field strip forces only cover the wings: the fuse keeps its on-body pressure moment
         if(m_bFarField && p4.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce;  // N.m/rho
+        if(p4.isFusePanel()) FuseMoment += PanelLeverArm * PanelForce;               // N.m/rho
     }
 
     if(m_pPolar3d->isViscous())
@@ -1181,6 +1208,194 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
     m_ForceFF = Force;                                        // the force of the quad methods is the far-field force
     if(m_pPolar3d->isVLM()) m_MomentFF = Moment;              // the on-body moment is vortex-based for VLM: keep it
     else                    m_MomentFF *= m_pPolar3d->density(); // N.m
+
+    // VLM2's derivatives: the near-field load of the lattice (rules 1 to 3 above); a fuse keeps its on-body moment
+    if(m_pPolar3d->isVLM2() && m_bFarField)
+    {
+        Vector3d ForceNF, MomentNF;
+        boundVortexLoad(Mu4, Sigma4, VInf, CoG, ForceNF, MomentNF);
+        m_MomentFF = MomentNF + FuseMoment * m_pPolar3d->density();
+        if(m_bRotationSuction)
+        {
+            Force = ForceNF;
+            m_ForceFF = ForceNF;
+        }
+    }
+}
+
+
+/**
+ * The near-field Kutta-Joukowski load of the VLM2 lattice (uav#81), as AVL's (Drela and Youngren, AVL 3.52, aero.f SFFORC): on each bound
+ * vortex, the segment m_VA-m_VB at a panel's quarter-chord line, the circulation Gamma = Mu[p] - Mu[p+1] (the panel's ring less the ring
+ * upstream, whose aft leg lies on the same line; the leading panel's alone) and the force rho Gamma (V + v) x l, with V the onset at the
+ * segment's midpoint (VInf of the panel and the rotation m_Omega) and v the velocity the lattice induces there, the segment's own being zero.
+ * The chordwise legs and the trailing legs carry no force (AVL's default, LTRFORCE), except in the sideslip derivatives
+ * (m_bSideslipVorticity): there the free-stream force of each ring's chordwise legs on the sheet, up to the trailing edge, is added at their
+ * midpoints, the vorticity load of the triangle methods (uav#79). Thin panels only (VLM2); fuse panels are left out.
+ * Force (N) and Moment (N.m, about CoG).
+ */
+void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::vector<Vector3d> const &VInf, Vector3d const &CoG,
+                                 Vector3d &Force, Vector3d &Moment) const
+{
+    int N = nPanels();
+    std::vector<Vector3d> F(N), M(N);
+    auto load = [&](int i0, int i1)
+    {
+        for(int p=i0; p<i1; p++)
+        {
+            Panel4 const &p4 = m_Panel4.at(p);
+            if(!p4.isMidPanel()) continue;
+            double G = Mu4[p];
+            if(!p4.isLeading()) G -= Mu4[p+1];
+            Vector3d l = p4.m_VB - p4.m_VA;
+            Vector3d mid = (p4.m_VA + p4.m_VB)*0.5;
+            Vector3d v;
+            getVelocityVector(mid, Mu4, Sigma4, v, Vortex::coreRadius(), false, false);
+            v += VInf.at(p) + (mid - p4.CoG()) * m_Omega;
+            F[p] = (v * l) * G;
+            M[p] = (mid - CoG) * F[p];
+
+            if(m_bSideslipVorticity)
+            {
+                // the ring's two chordwise legs, from its bound vortex to the next one downstream, or to the trailing edge
+                Vector3d TA, TB;
+                if(p4.isTrailing()) {TA = p4.TA();                  TB = p4.TB();}
+                else                {TA = m_Panel4.at(p-1).m_VA;    TB = m_Panel4.at(p-1).m_VB;}
+                Vector3d const &V = VInf.at(p);
+                Vector3d fR = (V * (TB - p4.m_VB)) * Mu4[p];
+                Vector3d fL = (V * (p4.m_VA - TA)) * Mu4[p];
+                F[p] += fR + fL;
+                M[p] += ((p4.m_VB + TB)*0.5 - CoG) * fR + ((p4.m_VA + TA)*0.5 - CoG) * fL;
+            }
+        }
+    };
+    int nThreads = std::max(1, std::min(s_MaxThreads, N));
+    int chunk = N/nThreads + 1;
+    std::vector<std::thread> threads;
+    for(int it=0; it<nThreads; it++) threads.push_back(std::thread(load, std::min(N, it*chunk), std::min(N, (it+1)*chunk)));
+    for(std::thread &t : threads) t.join();
+
+    Force.set(0.0, 0.0, 0.0);
+    Moment.set(0.0, 0.0, 0.0);
+    for(int p=0; p<N; p++)
+    {
+        Force  += F[p];
+        Moment += M[p];
+    }
+    Force  *= m_pPolar3d->density();     // N
+    Moment *= m_pPolar3d->density();     // N.m
+}
+
+
+/**
+ * product = (dA_wake/dtheta).mu for VLM2: the derivative of the influence matrix with respect to the yaw of the trailing legs of the
+ * trailing panels' horseshoes (they leave along (cos theta, sin theta, 0) from the points a quarter panel behind the trailing edge where
+ * the rings close), by a central difference between +theta and -theta, applied to the circulations mu without building the matrix.
+ * The rest of each column (the rings and the horseshoes' bound legs) does not depend on the yaw. As P3Analysis::yawedWakeProduct(), the
+ * panels of another wing within half the reference chord of a trailing panel's sheet and downstream of it keep the unyawed wake: the
+ * velocity of the legs jumps across the sheet, so that the yaw derivative of such a row is not resolved (a fin in the wing's wake).
+ */
+bool P4Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product)
+{
+    int N = nPanels();
+    if(!m_pPolar3d || !m_pPolar3d->isVLM2() || m_pPolar3d->bVortonWake() || int(mu.size())!=N || theta<=0.0) return false;
+
+    // the wings of the mesh: panels sharing a node are one piece
+    std::vector<int> parent(N);
+    for(int i=0; i<N; i++) parent[i] = i;
+    auto find = [&](int a){while(parent[a]!=a){parent[a]=parent[parent[a]]; a=parent[a];} return a;};
+    {
+        auto key = [](Vector3d const &v){return std::make_tuple(std::llround(v.x*1.0e7), std::llround(v.y*1.0e7), std::llround(v.z*1.0e7));};
+        std::map<std::tuple<long long,long long,long long>, int> owner;
+        for(int i=0; i<N; i++)
+        {
+            Panel4 const &p4 = m_Panel4.at(i);
+            for(Vector3d const &node : {p4.LA(), p4.LB(), p4.TA(), p4.TB()})
+            {
+                auto it = owner.find(key(node));
+                if(it==owner.end()) owner[key(node)] = i;
+                else
+                {
+                    int a = find(i), b = find(it->second);
+                    if(a!=b) parent[a] = b;
+                }
+            }
+        }
+    }
+
+    std::vector<int> trailing;
+    for(int k=0; k<N; k++) if(m_Panel4.at(k).isTrailing() && m_Panel4.at(k).isMidPanel()) trailing.push_back(k);
+
+    double clearance = 0.5 * m_pPolar3d->referenceChordLength();
+    std::vector<char> skip(N, 0);
+    for(int i=0; i<N; i++)
+    {
+        for(int k : trailing)
+        {
+            if(find(i)==find(k)) continue;
+            Panel4 const &pk = m_Panel4.at(k);
+            Vector3d Tl = pk.TA(), Tr = pk.TB();
+            Vector3d e = Tr - Tl;
+            double L = e.norm();
+            if(L<=0.0) continue;
+            e *= 1.0/L;
+            Vector3d nw = e * Vector3d(1.0, 0.0, 0.0);
+            double nn = nw.norm();
+            if(nn<1e-9) continue;
+            nw *= 1.0/nn;
+            Vector3d d = m_Panel4.at(i).m_CtrlPt - Tl;
+            if(d.x>0.0 && fabs(d.dot(nw))<clearance && d.dot(e)>-clearance && d.dot(e)<L+clearance) {skip[i] = 1; break;}
+        }
+    }
+    m_nYawedWakeRowsKept = 0;
+    for(char c : skip) m_nYawedWakeRowsKept += c;
+    if(m_nYawedWakeRowsKept>0)
+        traceStdLog(std::format("      sideslip derivatives: {:d} panels lie within half a reference chord of another surface's wake sheet and keep the unyawed wake\n", m_nYawedWakeRowsKept));
+
+    double fardist = m_pPolar3d->TrefftzDistance();
+    bool bMirror = m_pPolar3d->bGroundEffect() || m_pPolar3d->bFreeSurfaceEffect();
+    double mirror = m_pPolar3d->bGroundEffect() ? 1.0 : -1.0;
+    // the velocity of the two trailing legs of trailing panel k at C, yawed by th, for a unit circulation (VLMCmnVelocity without its bound leg)
+    auto legs = [&](Panel4 const &pk, Vector3d const &C, double th)
+    {
+        Vector3d A = pk.TA(), B = pk.TB();
+        A.x += (pk.TA().x-pk.m_VA.x)/3.0;     // as VLMGetVortexInfluence()
+        B.x += (pk.TB().x-pk.m_VB.x)/3.0;
+        Vector3d far(cos(th)*fardist, sin(th)*fardist, 0.0);
+        Vector3d V = vortexInducedVelocity(A+far, A, C, Vortex::coreRadius()) + vortexInducedVelocity(B, B+far, C, Vortex::coreRadius());
+        if(bMirror)
+        {
+            Vector3d CG(C.x, C.y, -C.z-2.0*m_pPolar3d->groundHeight());
+            Vector3d VG = vortexInducedVelocity(A+far, A, CG, Vortex::coreRadius()) + vortexInducedVelocity(B, B+far, CG, Vortex::coreRadius());
+            V.x += VG.x*mirror;
+            V.y += VG.y*mirror;
+            V.z -= VG.z*mirror;
+        }
+        return V;
+    };
+
+    product.assign(N, 0.0);
+    auto rows = [&](int i0, int i1)
+    {
+        for(int i=i0; i<i1; i++)
+        {
+            Panel4 const &pi = m_Panel4.at(i);
+            if(skip[i] || !pi.isMidPanel()) continue;
+            double sum = 0.0;
+            for(int k : trailing)
+            {
+                Panel4 const &pk = m_Panel4.at(k);
+                sum += (legs(pk, pi.m_CtrlPt, theta) - legs(pk, pi.m_CtrlPt, -theta)).dot(pi.normal()) * mu[k];
+            }
+            product[i] = sum/(2.0*theta);
+        }
+    };
+    int nThreads = std::max(1, std::min(s_MaxThreads, N));
+    int chunk = N/nThreads + 1;
+    std::vector<std::thread> threads;
+    for(int it=0; it<nThreads; it++) threads.push_back(std::thread(rows, std::min(N, it*chunk), std::min(N, (it+1)*chunk)));
+    for(std::thread &t : threads) t.join();
+    return true;
 }
 
 
