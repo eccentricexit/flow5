@@ -27,6 +27,7 @@
 #include <iostream>
 #include <format>
 #include <thread>
+#include <array>
 
 
 #include <p3analysis.h>
@@ -656,8 +657,12 @@ bool P3Analysis::stripSuctionFrame(Panel3 const &p3, Vector3d &n, Vector3d &e, V
  * follow the real surface, its twist and dihedral included, plus that of the leading-edge force F - FP, whose component in the plane (the suction)
  * is made perpendicular to the leading edge with its chordwise component unchanged:
  *     F.e  ->  FP.e + ((F-FP).t) (d.e)/(d.t)
- * Nothing is chosen along the chord. Thick strips take the same: their pressures carry most of the suction, in its own direction; the rest, the
- * difference between the far-field and the pressure force, is directed as the suction. Returns the change, along e.
+ * Nothing is chosen along the chord. Thick strips take the same with FP the pressure force of their lift (thickStripLiftPressureForce(): the panel forces
+ * projected on the mean surface's normal, cell by cell), so that their suction, which their pressures carry in the plane of the mean surface, is directed
+ * as a thin strip's. With the whole pressure force instead (flow5#30) a thick strip's span component took the thickness' own pressures as well: the
+ * fluid's impulse turned by a yaw rate, -Omega x (M_a V) (Kirchhoff; Lamb, Hydrodynamics, sec. 124), which the thin sheet and AVL have not, and only the
+ * part of it on the strips' spanwise slopes, not on the tips (flow5#31: CYr of an elliptic NACA 0012 wing -0.0057 against -0.0009 thin, of the
+ * rectangular one the thin's). Returns the change, along e.
  * forces() applies it in rotating states only (m_bRotationSuction): without rotation the strips' far-field force is exact in total.
  */
 Vector3d P3Analysis::stripSuctionCorrection(Panel3 const &p3, Vector3d const &F, Vector3d const &FP) const
@@ -1261,6 +1266,236 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
 
 
 /**
+ * The panels of the thick strip whose bottom trailing panel is i3, in the order of the iPU links (bottom surface from the trailing edge, leading edge, top surface
+ * to the trailing edge), and its number of chordwise cells a side NX: cell c (panels 2c and 2c+1) of the bottom faces cell 2 NX - 1 - c of the top. False if the
+ * chain is not 2 NX cells of two triangles, the first NX on the bottom.
+ */
+bool P3Analysis::thickStripChain(int i3, std::vector<int> &chain, int &NX) const
+{
+    chain.clear();
+    NX = 0;
+    if(i3<0 || i3>=nPanels() || !m_Panel3.at(i3).isBotPanel()) return false;
+    for(int k=i3; k>=0; k=m_Panel3.at(k).m_iPU)
+    {
+        chain.push_back(k);
+        if(int(chain.size())>nPanels()) return false;
+    }
+    if(chain.size()%4!=0 || chain.size()<4) return false;
+    NX = int(chain.size())/4;
+    for(int j=0; j<int(chain.size()); j++)
+        if(m_Panel3.at(chain[j]).isBotPanel() != (j<2*NX)) return false;
+    return true;
+}
+
+
+/**
+ * The pressure force of the lift of a thick strip (N/rho): per chordwise cell, the panel forces of the bottom cell and of the top cell facing it, panelForce (N/rho
+ * per panel), projected on the cell's mean-surface normal, the difference of the top's and the bottom's area-weighted normals. On a thin strip the panel
+ * force is that of the pressure jump across the sheet, normal to it; on a thick strip the projection keeps that part, the jump between facing points, and leaves
+ * out the in-plane part of the pressures: the leading-edge suction, which the rotating states direct as on a thin strip (stripSuctionCorrection()), and the
+ * thickness' own pressures (uav#80). False if the strip's chain is not regular (the caller then takes the whole strip's pressure force).
+ */
+bool P3Analysis::thickStripLiftPressureForce(int i3, std::vector<Vector3d> const &panelForce, Vector3d &FP) const
+{
+    FP.set(0.0, 0.0, 0.0);
+    std::vector<int> chain;
+    int NX = 0;
+    if(!thickStripChain(i3, chain, NX)) return false;
+    for(int c=0; c<NX; c++)
+    {
+        int cb[2] = {chain[2*c], chain[2*c+1]};
+        int ct[2] = {chain[2*(2*NX-1-c)], chain[2*(2*NX-1-c)+1]};
+        Vector3d n, f;
+        for(int k=0; k<2; k++)
+        {
+            Panel3 const &pb = m_Panel3.at(cb[k]);
+            Panel3 const &pt = m_Panel3.at(ct[k]);
+            n += pt.normal()*pt.area() - pb.normal()*pb.area();
+            f += panelForce.at(cb[k]) + panelForce.at(ct[k]);
+        }
+        if(n.norm()<1.0e-12) return false;
+        n.normalize();
+        FP += n * f.dot(n);
+    }
+    return true;
+}
+
+
+/**
+ * The free-stream Kutta-Joukowski force of the lifting vorticity of the thick strips, on their mean surface (uav#80).
+ *
+ * A thick strip carries the doublet density mu on its bottom and top surfaces. Its vorticity is the lift's and the thickness': the part of mu common to both
+ * surfaces, with the sources, makes the thickness, which the free stream alone does not load (on a closed surface the force on that vorticity is that of the
+ * mean velocity across the sheet, not of the free stream). The jump mu_top - mu_bottom between facing points is the lift's: it is the doublet density of the
+ * mean surface that, with the thickness' sources, has the same far field (thin-wing theory: the lifting problem is the antisymmetric part, Katz and Plotkin,
+ * Low-Speed Aerodynamics, 2nd ed., 2001, sec. 4.4 and 12.1). At the trailing edge it is the strip's circulation, at the leading edge 0.
+ *
+ * Each strip is walked from its bottom trailing panel along the iPU links (bottom surface, leading edge, top surface); its chordwise stations are the pairs of nodes
+ * that two consecutive cells share, the station s of the bottom facing the station 2 NX - s of the top. The mean surface is the bottom's triangles with each node
+ * moved to the midpoint of itself and its facing node, its nodal density mu_top - mu_bottom (each node's value the mean of the strip's panels that hold it);
+ * its load is that of sheetVorticityLoad() on a thin sheet: per triangle a ring of circulation 4 pi mu along its edges, closed by the area vorticity, the trailing
+ * edge left out. The sense of each strip's rings is set by its circulation (forces(): the force rho Gamma V x l of the bottom trailing panel's vortex), so that the
+ * total is the free-stream part of the strips' far-field force (Stokes): measured within 0.3 percent (the rectangular and the 45 deg swept wing), the nodal
+ * densities being means over each strip's own panels.
+ *
+ * Adds the moment about the CoG (N.m) to Moment, sets Force (N), a check. irregular: the bottom trailing panels of the strips whose mesh is not the expected chain
+ * of cells (a null triangle), which add nothing: forces() keeps their free-stream force at their quarter points.
+ */
+void P3Analysis::meanSheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, Vector3d &Force, Vector3d &Moment,
+                                        std::vector<int> &irregular) const
+{
+    struct MeanTri {Vector3d x[3]; double mu[3]; bool te[3]; Vector3d V; double G;};
+    std::vector<MeanTri> tris;
+    Force.set(0.0, 0.0, 0.0);
+    irregular.clear();
+
+    // the mean surface of one strip, from its bottom trailing panel i3; false if its mesh is not the expected chain of cells
+    auto addStrip = [&](int i3) -> bool
+    {
+        Panel3 const &p3 = m_Panel3.at(i3);
+        std::vector<int> chain;
+        int NX = 0;
+        if(!thickStripChain(i3, chain, NX)) return false;
+        int nCells = 2*NX;
+
+        // the stations: st[s] = {node on the side of the bottom trailing panel's left trailing node, the other}
+        std::vector<std::array<int,2>> st(nCells+1);
+        st[0] = {p3.leftTrailingNode().index(), p3.rightTrailingNode().index()};
+        for(int c=0; c<nCells; c++)
+        {
+            Panel3 const &t1 = m_Panel3.at(chain[2*c]);
+            Panel3 const &t2 = m_Panel3.at(chain[2*c+1]);
+            auto nOld = [&](Panel3 const &t){int n=0; for(int k=0; k<3; k++) if(t.nodeIndex(k)==st[c][0] || t.nodeIndex(k)==st[c][1]) n++; return n;};
+            Panel3 const *pOne=nullptr, *pTwo=nullptr;
+            if     (nOld(t1)==1 && nOld(t2)==2) {pOne=&t1; pTwo=&t2;}
+            else if(nOld(t1)==2 && nOld(t2)==1) {pOne=&t2; pTwo=&t1;}
+            else return false;
+            int diag=-1;
+            for(int k=0; k<3; k++) if(pTwo->nodeIndex(k)!=st[c][0] && pTwo->nodeIndex(k)!=st[c][1]) diag = pTwo->nodeIndex(k);
+            int xside=-1, other=-1;
+            for(int k=0; k<3; k++)
+            {
+                int n = pOne->nodeIndex(k);
+                if(n==st[c][0]) xside = 0;
+                else if(n==st[c][1]) xside = 1;
+                else if(n!=diag) other = n;
+            }
+            if(diag<0 || other<0 || xside<0 || !pOne->hasVertex(diag)) return false;
+            st[c+1][xside]   = other;
+            st[c+1][1-xside] = diag;
+        }
+
+        // the nodal densities, each the mean of the strip's panels that hold the node
+        auto nodeMu = [&](int node)
+        {
+            double sum=0.0; int n=0;
+            for(int j : chain)
+                for(int k=0; k<3; k++)
+                    if(m_Panel3.at(j).nodeIndex(k)==node) {sum += Mu3[3*j+k]; n++;}
+            return n>0 ? sum/double(n) : 0.0;
+        };
+        auto nodePos = [&](int node) -> Vector3d
+        {
+            for(int j : chain)
+                for(int k=0; k<3; k++)
+                    if(m_Panel3.at(j).nodeIndex(k)==node) return m_Panel3.at(j).vertexAt(k);
+            return Vector3d();
+        };
+
+        // the mean surface's nodes, station s = 0 (trailing edge) to NX (leading edge)
+        std::vector<std::array<Vector3d,2>> mx(NX+1);
+        std::vector<std::array<double,2>> mmu(NX+1);
+        for(int s=0; s<=NX; s++)
+            for(int side=0; side<2; side++)
+            {
+                int nb = st[s][side], nt = st[2*NX-s][side];
+                mx[s][side]  = (nodePos(nb) + nodePos(nt)) * 0.5;
+                mmu[s][side] = nb==nt ? 0.0 : nodeMu(nt) - nodeMu(nb);
+            }
+
+        // the bottom's triangles on the mean surface, oriented as the bottom's normal reversed (towards the top)
+        double sense = 0.0;
+        size_t first = tris.size();
+        for(int j=0; j<2*NX; j++)
+        {
+            Panel3 const &pb = m_Panel3.at(chain[j]);
+            int c = j/2;
+            MeanTri t;
+            for(int k=0; k<3; k++)
+            {
+                int n = pb.nodeIndex(k);
+                int s=-1, side=-1;
+                for(int ss=c; ss<=c+1; ss++)
+                    for(int sd=0; sd<2; sd++)
+                        if(st[ss][sd]==n) {s=ss; side=sd;}
+                if(s<0) return false;
+                t.x[k]  = mx[s][side];
+                t.mu[k] = mmu[s][side];
+                t.te[k] = s==0;
+            }
+            Vector3d nrm = (t.x[1]-t.x[0]) * (t.x[2]-t.x[0]);
+            if(nrm.dot(pb.normal())>0.0)
+            {
+                std::swap(t.x[1], t.x[2]);
+                std::swap(t.mu[1], t.mu[2]);
+                std::swap(t.te[1], t.te[2]);
+            }
+            t.V = VInf.at(chain[j]);
+            t.G = 0.0;
+            for(int k=0; k<3; k++)
+            {
+                int k1 = (k+1)%3;
+                if(t.te[k] && t.te[k1]) sense = (t.x[k1]-t.x[k]).dot(p3.trailingVortex())>=0.0 ? 1.0 : -1.0;
+            }
+            tris.push_back(t);
+        }
+        if(sense==0.0) return false;
+        for(size_t k=first; k<tris.size(); k++) tris[k].G = sense * 4.0*PI * m_pPolar3d->density();
+        return true;
+    };
+
+    for(int i3=0; i3<nPanels(); i3++)
+    {
+        Panel3 const &p3 = m_Panel3.at(i3);
+        if(!p3.isTrailing() || !p3.isBotPanel()) continue;
+        size_t n0 = tris.size();
+        if(!addStrip(i3))
+        {
+            tris.resize(n0);
+            irregular.push_back(i3);
+        }
+    }
+
+    // the load of each triangle, as sheetVorticityLoad()
+    for(MeanTri const &t : tris)
+    {
+        Vector3d n = (t.x[1]-t.x[0]) * (t.x[2]-t.x[0]);
+        double area = n.norm()/2.0;
+        if(area<=0.0) continue;
+        n *= 1.0/(2.0*area);
+        Vector3d grad;
+        for(int k=0; k<3; k++) grad += (n * (t.x[(k+2)%3] - t.x[(k+1)%3])) * t.mu[k];
+        grad *= 1.0/(2.0*area);
+        Vector3d centroid = (t.x[0]+t.x[1]+t.x[2])/3.0;
+        Vector3d Fa = (t.V * (n * grad)) * (-t.G * area);
+        Moment += (centroid - CoG) * Fa;
+        Force  += Fa;
+        for(int k=0; k<3; k++)
+        {
+            int k1 = (k+1)%3;
+            if(t.te[k] && t.te[k1]) continue;
+            Vector3d l = t.x[k1] - t.x[k];
+            double m0 = (t.mu[k]+t.mu[k1])/2.0;
+            Vector3d lever = (t.x[k]-CoG)*m0 + l*((t.mu[k]+2.0*t.mu[k1])/6.0);
+            Vector3d dF = t.V * l;
+            Moment += (lever * dF) * t.G;
+            Force  += dF * (m0 * t.G);
+        }
+    }
+}
+
+
+/**
 * Calculates the forces using a far-field method.
 * Calculates the moments by a near field method, i.e. direct summation on the panels.
 * The downwash is evaluated far downstream (i.e. where the inluence of the bounded vortices is negligible)
@@ -1282,7 +1517,8 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
 *
 * In the sideslip derivatives m_MomentFF puts the free-stream part of the strips' forces on the vorticity of the sheet instead of the quarter points
 * (sheetVorticityLoad(), thin surfaces; uav#79): the strips' force V x Gamma l_TE is right as a total (Stokes), but lumps at the quarter point the chordwise
-* vorticity d(mu)/dy between the strips, whose force in a sideslip carries the rolling and yawing moments.
+* vorticity d(mu)/dy between the strips, whose force in a sideslip carries the rolling and yawing moments. Thick strips put it on their lifting vorticity,
+* the jump mu_top - mu_bottom on their mean surface (meanSheetVorticityLoad(), uav#80).
 *
 * In rotating states (m_bRotationSuction) each strip's leading-edge suction is directed perpendicular to the leading edge, in the forces and the moments:
 * without rotation the strips' far-field force is exact in total, with it the near-field force is the reference (flow5#28).
@@ -1326,7 +1562,8 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     // The far-field velocity of the strips is the one of the polar's induced force (trefftzDrag): the analytic Trefftz plane perpendicular to the wake sheet,
     // from the trailing legs of every strip of every surface for this solution; half of it is the velocity at the bound vortex. It does not depend on the
     // length of the wake.
-    bool bSheetLoad = m_bFarField && m_bSideslipVorticity;   // thin surfaces, sideslip derivatives (uav#79)
+    bool bSheetLoad = m_bFarField && m_bSideslipVorticity;   // sideslip derivatives (uav#79; thick surfaces uav#80)
+    std::vector<std::pair<int, Vector3d>> thickFreeStream;   // the thick strips' bottom trailing panels and the free-stream parts of their far-field forces (N), with bSheetLoad
 
     Vector3d wakedir(1.0, 0.0, 0.0);
     if(m_bSideslipFarField && !VInf.empty() && VInf.front().norm()>0.0) wakedir = VInf.front()/VInf.front().norm();   // the sideslip derivatives' wake leaves along the free stream
@@ -1453,11 +1690,20 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             if(m_bFarField)
             {
                 Vector3d WgFF = trefftzWash(p3);
+                Vector3d wash = WgFF;
                 WgFF += VInf.at(i3);
                 stripforce  = vortex * WgFF;
                 stripforce *= GammaStrip * m_pPolar3d->density();     // N
                 m_ForceFF += stripforce;
-                m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
+                if(bSheetLoad)
+                {
+                    // as the thin strips: the Trefftz-plane part at the quarter point, the free-stream part on the mean surface's vorticity below
+                    Vector3d inducedforce = vortex * wash;
+                    inducedforce *= GammaStrip * m_pPolar3d->density();     // N
+                    m_MomentFF += (quarterpoint - CoG) * inducedforce;   // N.m
+                    thickFreeStream.push_back({i3, stripforce - inducedforce});
+                }
+                else m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
             }
 
             // the panels of the strip: the chain of the iPU links from the bottom trailing panel runs along the bottom surface
@@ -1486,12 +1732,28 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     if(bSheetLoad && !stripG.empty())
     {
         Vector3d sheetForce;
-        sheetVorticityLoad(Mu3, VInf, CoG, stripG.front(), sheetForce, m_MomentFF);
+        if(!thickFreeStream.empty())
+        {
+            // thick strips: the lifting vorticity on the mean surface (uav#80); a strip whose mesh is not the regular chain of cells keeps its free-stream
+            // force at its quarter point, as the older model
+            std::vector<int> irregular;
+            meanSheetVorticityLoad(Mu3, VInf, CoG, sheetForce, m_MomentFF, irregular);
+            for(int i : irregular)
+                for(auto const &fs : thickFreeStream)
+                    if(fs.first==i) m_MomentFF += (stripQuarterPoint(m_Panel3.at(i)) - CoG) * fs.second;   // N.m
+        }
+        else sheetVorticityLoad(Mu3, VInf, CoG, stripG.front(), sheetForce, m_MomentFF);
     }
 
     //On-Body moment
 
     Moment.set(0.0,0.0,0.0);
+
+    // the rotating states' suction rule needs the panel forces of the thick strips (thickStripLiftPressureForce())
+    bool bRotationThick = false;
+    if(m_bRotationSuction && m_bFarField)
+        for(bool b : stripThin) if(!b) bRotationThick = true;
+    std::vector<Vector3d> panelForce(bRotationThick ? nPanels() : 0);
 
     for(int i3=0; i3<nPanels(); i3++)
     {
@@ -1504,6 +1766,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             PanelForce = p3.normal() * (-Cp) * p3.area() *1/2.*QInf*QInf;      // Newtons/rho
             PanelLeverArm = p3.CoG() - CoG;
             Moment += PanelLeverArm * PanelForce;                     // N.m/rho
+            if(bRotationThick) panelForce[i3] = PanelForce;
             if(stripOfPanel[i3]>=0)
             {
                 int iStrip = stripOfPanel[i3];
@@ -1558,6 +1821,8 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
         {
             Panel3 const &p3 = m_Panel3.at(stripTP[is]);
             Vector3d FP = stripFP[is] * m_pPolar3d->density();   // N
+            Vector3d FPlift;
+            if(!stripThin[is] && thickStripLiftPressureForce(stripTP[is], panelForce, FPlift)) FP = FPlift * m_pPolar3d->density();   // uav#80
             Force += stripSuctionCorrection(p3, stripNF[is], FP);
             Vector3d dF = stripSuctionCorrection(p3, stripFF[is], FP);
             m_ForceFF   += dF;
@@ -2047,10 +2312,11 @@ bool P3Analysis::makeYawedWakeCorrection(std::vector<double> const &sol0, std::v
  * quarter-chord points plus the strips' own chordwise loads, which is the pressure moment with the leading-edge force that the panels miss (forces(): Moment).
  * With bSideslipModel the state is evaluated by the sideslip model of the v derivatives (uav#79): the Trefftz plane of the far field is perpendicular to the onset
  * flow, whose direction is that of the first panel's, and the free-stream force of the doublet sheet is put on the sheet's vorticity instead of at the quarter points
- * (the chordwise loads stay). It sets m_Cp.
+ * (the chordwise loads stay). pOnBodyMoment, if given, receives the on-body moment of forces() (N.m: the pressures, with the thin strips' leading-edge force), which
+ * is the moment of a point of a thick plane (PlaneTask::applySideslipModel()). It sets m_Cp.
  */
 void P3Analysis::stateFarField(std::vector<double> const &sol, std::vector<Vector3d> const &field, double alpha, Vector3d const &CoG, bool bFuseMi, bool bSideslipModel,
-                               Vector3d &Force, Vector3d &Moment)
+                               Vector3d &Force, Vector3d &Moment, Vector3d *pOnBodyMoment)
 {
     std::vector<double> none(sol.size(), 0.0);
     std::vector<double> mu3(3*nPanels());
@@ -2073,4 +2339,5 @@ void P3Analysis::stateFarField(std::vector<double> const &sol, std::vector<Vecto
 
     Force  = m_ForceFF;
     Moment = m_MomentFF + m_MomentLocal;
+    if(pOnBodyMoment) *pOnBodyMoment = dummyMoment;
 }

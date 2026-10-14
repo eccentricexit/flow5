@@ -2361,12 +2361,12 @@ bool PlaneTask::checkRatePoints()
 
 
 /**
- * Whether the points with sideslip follow the sideslip model of the derivatives (uav#79, flow5#23, applySideslipModel()): thin surfaces of the triangle methods on planes of
- * wings without a fuselage, ground effect or vorton wake. Thick surfaces, VLM and the rest keep the older model of the polar.
+ * Whether the points with sideslip follow the sideslip model of the derivatives (uav#79, flow5#23, applySideslipModel()): the triangle methods, thin or thick (uav#80), on planes
+ * of wings without a fuselage, ground effect or vorton wake. VLM and the rest keep the older model of the polar.
  */
 bool PlaneTask::sideslipModelApplies() const
 {
-    return m_pP3A && m_pPlPolar->isTriangleMethod() && m_pPlPolar->bThinSurfaces() && m_pPlane->isXflType() && !m_pPlane->hasFuse()
+    return m_pP3A && m_pPlPolar->isTriangleMethod() && m_pPlane->isXflType() && !m_pPlane->hasFuse()
            && !m_pPlPolar->bGroundEffect() && !m_pPolar3d->bVortonWake();
 }
 
@@ -2402,13 +2402,16 @@ bool PlaneTask::applySideslipModel(double alpha, double beta, double Q, Vector3d
     }
 
     std::vector<Vector3d> field0(pPA->nPanels(), V0), fieldB(pPA->nPanels(), V);
-    Vector3d FE, ME, FA, MA, FD, MD, FB, MB;
-    pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, false, FE, ME);    // plain model, no sideslip
-    pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, false, FA, MA);    // plain model, sideslip (yawed wake's circulation)
-    pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, true,  FD, MD);    // sideslip model, no sideslip
-    pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, true,  FB, MB);    // sideslip model, sideslip
+    Vector3d FE, ME, FA, MA, FD, MD, FB, MB, OE, OA;
+    pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, false, FE, ME, &OE);    // plain model, no sideslip
+    pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, false, FA, MA, &OA);    // plain model, sideslip (yawed wake's circulation)
+    pPA->stateFarField(sol0,     field0, alpha, CoG, bFuseMi, true,  FD, MD);         // sideslip model, no sideslip
+    pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, true,  FB, MB);         // sideslip model, sideslip
     m_dForceRate  = ((FB-FD) - (FA-FE)) * (1.0/qDyn);     // N/q
     m_dMomentRate = ((MB-MD) - (MA-ME)) * (1.0/qDyn);     // N.m/q
+    // Thick surfaces (uav#80): the point's moment is the on-body pressure moment, without a leading-edge force, so the plain model's change it carries is that of the
+    // pressures (OA-OE), not that of the strips (MA-ME); with it the point's moment changes by the sideslip model's (MB-MD), as the derivatives
+    if(pPA->hasThickSurfaces()) m_dMomentRate = ((MB-MD) - (OA-OE)) * (1.0/qDyn);     // N.m/q
     return true;
 }
 
