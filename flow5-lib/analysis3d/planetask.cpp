@@ -2448,10 +2448,23 @@ bool PlaneTask::solveRatePoint(T8Opp const &t8opp, Vector3d const &CoG, bool bFu
 
     m_dForceRate.set(0.0, 0.0, 0.0);
     m_dMomentRate.set(0.0, 0.0, 0.0);
+    std::vector<double> const solPlain = sol;   // the solution before the sideslip model's change: the rotation's part is made from it (rule 3 of P3Analysis::forces())
     if(fabs(beta)>0.0 && !applySideslipModel(alpha, beta, Q, CoG, bFuseMi, sol)) return false;
 
     std::vector<Vector3d> field;
     pPA->makeOnsetField(V, Omega, CoG, field);
+
+    // the rotation's part of the strips' leading-edge suction, which the rate derivatives take (P3Analysis::stateSuctionChange(), flow5#28);
+    // with sideslip it is made from the solution without the sideslip model's change and added to that change: superposition, exact to first
+    // order (the cross term is left out), and a point whose rates go to zero tends to the point without them
+    if(Omega.norm()>0.0)
+    {
+        Vector3d dF, dM;
+        pPA->stateSuctionChange(solPlain, field, V, alpha, CoG, bFuseMi, dF, dM);
+        double const qDyn = 0.5*m_pPlPolar->density()*Q*Q;
+        m_dForceRate  += dF * (1.0/qDyn);     // N/q
+        m_dMomentRate += dM * (1.0/qDyn);     // N.m/q
+    }
     pPA->makeSourceStrengths(field);     // none on thin surfaces
     pPA->setStateDoublets(sol);
     pPA->makeStateCp(sol, field, Q, alpha);
