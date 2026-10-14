@@ -4462,8 +4462,8 @@ QString XPlane::planeOppData()
     for(int i=strong.length(); i<linelength; i++) strong = " "+strong;
     Result += strong +"\n";
 
-    double Cli = m_pCurPOpp->m_AF.Cli();
-    strong = QString("Cl = " + format).arg(Cli, 8, 'f', 3);
+    double Cl = m_pCurPOpp->m_AF.Cl();
+    strong = QString("Cl = " + format).arg(Cl, 8, 'f', 3);
     for(int i=strong.length(); i<linelength; i++) strong = " "+strong;
     Result += strong +"\n";
 

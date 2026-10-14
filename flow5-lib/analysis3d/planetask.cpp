@@ -1426,6 +1426,7 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
                 pWing->computeViscousForces(m_pPlPolar, alpha, beta, m_SpanDistFF[iw], m_PartAF[iw]);
                 m_AF.addProfileDrag(m_PartAF.at(iw).profileDrag());           //N/q
                 m_AF.addMv(m_PartAF.at(iw).Mv());                             //N.m/q
+                m_AF.addFv(m_PartAF.at(iw).Fv());                             //N/q
             }
         }
         traceStdLog("             ...done.\n");
@@ -1476,6 +1477,8 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
                 Vector3d leverarm = (pPlaneXfl->fusePos(0)+pFuse->inertia().CoG_t())-CoG;
                 m_AF.addMv(leverarm * ForceFuse);
                 m_PartAF[ipart].setMv(leverarm * ForceFuse);
+                m_AF.addFv(ForceFuse);                                        // N/q, the force whose moment is Mv
+                m_PartAF[ipart].setFv(ForceFuse);
             }
         }
     }

@@ -563,11 +563,11 @@ double PlanePolar::getVariable(int iVar, int index) const
         case 5:  return AF.CD();
         case 6:  return AF.CDv();
         case 7:  return AF.CDi();
-        case 8:  return AF.Cy();
+        case 8:  return AF.Cy()+AF.Cyv();
         case 9:  return AF.Cm();
         case 10: return AF.Cmv();
         case 11: return AF.Cmi();
-        case 12: return AF.Cli();
+        case 12: return AF.Cl();
         case 13: return AF.Cn();
         case 14: return AF.Cnv();
         case 15: return AF.Cni();
@@ -586,7 +586,7 @@ double PlanePolar::getVariable(int iVar, int index) const
             return AF.Fff().dot(WindN) *q * Units::NtoUnit();
         case 20: return (AF.Fff().dot(WindD) +AF.CDv()*m_RefArea)*q * Units::NtoUnit();
         case 21: return AF.Fff().dot(WindD) *q * Units::NtoUnit();
-        case 22: return AF.Fff().dot(WindS) *q * Units::NtoUnit();
+        case 22: return (AF.Fff()+AF.Fv()).dot(WindS) *q * Units::NtoUnit();
         case 23: return AF.Fff().dot(WindN) *q * Units::NtoUnit();
         case 24: return AF.Fsum().dot(WindD)*q * Units::NtoUnit();
         case 25: return AF.Fsum().dot(WindS)*q * Units::NtoUnit();
@@ -622,7 +622,7 @@ double PlanePolar::getVariable(int iVar, int index) const
         case 31: return Vz(index) * Units::mstoUnit();
         case 32: return m_QInfinite.at(index) * Units::mstoUnit();
         case 33: if(fabs(AF.CL())>PRECISION) return atan(AF.CD()/AF.CL()) * 180.0/PI;  else return 0.0;
-        case 34: return AF.Mi().x*q * Units::NmtoUnit();
+        case 34: return (AF.Mi().x + AF.Mv().x)*q * Units::NmtoUnit();
         case 35: return (AF.Mi().y + AF.Mv().y)*q * Units::NmtoUnit();
         case 36: return (AF.Mi().z + AF.Mv().z)*q * Units::NmtoUnit();
         case 37: return AF.centreOfPressure().x * Units::mtoUnit();

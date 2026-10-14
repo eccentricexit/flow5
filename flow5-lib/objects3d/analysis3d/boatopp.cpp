@@ -307,7 +307,7 @@ void BoatOpp::exportMainDataToString(Boat const*, std::string &data, xfl::enumTe
     btoppdata += strange+sep;
     strange = std::format("{:11.5g}", m_AF.CDv());
     btoppdata += strange+sep;
-    strange = std::format("{:11.5g}", m_AF.Cli());
+    strange = std::format("{:11.5g}", m_AF.Cl());
     btoppdata += strange+sep;
     strange = std::format("{:11.5g}", m_AF.Cmi());
     btoppdata += strange+sep;
