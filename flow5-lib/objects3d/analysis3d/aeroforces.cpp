@@ -67,7 +67,8 @@ double AeroForces::CL() const
 
 double AeroForces::CSide() const
 {
-    return m_RefArea>MINREFAREA ? m_Fff.dot(m_CFWind.Jdir())/m_RefArea : 0.0;
+    // the profile drag's force across the wind (m_Fv; zero without body rates) is part of the side force
+    return m_RefArea>MINREFAREA ? (m_Fff+m_Fv).dot(m_CFWind.Jdir())/m_RefArea : 0.0;
 }
 
 
@@ -82,6 +83,20 @@ double AeroForces::Cli() const
     if(m_RefArea<MINREFAREA || m_RefChord<MINREFDIMENSION) return 0.0;
     // changed in v7.24
     return m_Mi.dot(m_CFWind.Idir())/m_RefSpan/m_RefArea;
+}
+
+
+double AeroForces::Clv() const
+{
+    if(m_RefArea<MINREFAREA || m_RefChord<MINREFDIMENSION) return 0.0;
+    // the moment of the profile drag about the wind axis, with Cli()'s sign and reference dimensions
+    return m_Mv.dot(m_CFWind.Idir())/m_RefSpan/m_RefArea;
+}
+
+
+double AeroForces::Cl() const
+{
+    return Cli()+Clv();
 }
 
 
@@ -150,6 +165,7 @@ void AeroForces::duplicate(AeroForces const & ac)
     m_ExtraDrag   = ac.m_ExtraDrag;
     m_Mi          = ac.m_Mi;
     m_Mv          = ac.m_Mv;
+    m_Fv          = ac.m_Fv;
     m_M0          = ac.m_M0;
 }
 
@@ -175,6 +191,7 @@ void AeroForces::resetResults()
     m_ProfileDrag = m_FuseDrag = m_ExtraDrag = 0.0;
     m_Mi.set(0.0,0.0,0.0);
     m_Mv.set(0.0,0.0,0.0);
+    m_Fv.set(0.0,0.0,0.0);
     m_M0.set(0.0,0.0,0.0);
 }
 

@@ -2173,6 +2173,7 @@ void WingXfl::computeViscousForces(PlanePolar const *pWPolar, double alpha, doub
     //project on wind axis
     AF.setProfileDrag(Fv.dot(winddirection));    // N/q
     AF.setMv(Mv);    // N.m/q
+    AF.setFv(Fv);    // N/q: the part across the wind is a side force (and the strips' drag moment about x a rolling moment, which is in Mv)
 }
 
 

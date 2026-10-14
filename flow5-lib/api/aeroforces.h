@@ -79,14 +79,20 @@ struct FL5LIB_EXPORT  AeroForces
 
     // Coefficients in Wind Axes
     double CL()    const;
-    double CSide() const;
+    double CSide() const;          /**< the side force in wind axes: the far-field force and the profile drag's force across the wind (Fv) */
     double CDi()   const;
     double CDv()   const {return m_RefArea>MINREFAREA ? (m_ProfileDrag+m_FuseDrag+m_ExtraDrag)/m_RefArea    : 0.0;}
     double CD()    const {return CDi()+CDv();}
 
+    // Fv is the strips' drag along their local flow, summed: a force vector like Fff, so its y component is the viscous part of Cy
+    // (Cy()+Cyv() is the y component of the total, and with a sideslip it includes the drag's projection, -CDv sin(beta) as Fff has the induced drag's)
+    double Cyv() const {return m_RefArea>MINREFAREA ? m_Fv.y/m_RefArea : 0.0;} // in Body axes
+
     // The roll such that the starboard wing goes down is >0
     // Opposite to algebraic result in body axis
-    double Cli() const;
+    double Cli() const;               // from the pressure forces
+    double Clv() const;               // from the profile drag, same sign and reference as Cli
+    double Cl()  const;               // Cli()+Clv(), as Cm() and Cn()
 
     // The pitching moment nose up is >0
     // Same as algebraic result in body axis
@@ -125,6 +131,13 @@ struct FL5LIB_EXPORT  AeroForces
     void setMv(Vector3d const &Mv) {m_Mv=Mv;}              // N.m/q
     void addMv(Vector3d const &Mv) {m_Mv+=Mv;}             // N.m/q
 
+    /** The resultant viscous (profile and fuselage friction) drag force in body axes, N/q: the force whose moment about the CoG is Mv.
+     *  Its component along the wind is profileDrag()+fuseDrag(); the rest, across the wind, is zero without body rates (the strips' drag
+     *  then lies along the free stream) */
+    Vector3d const &Fv() const {return m_Fv;}
+    void setFv(Vector3d const &Fv) {m_Fv=Fv;}              // N/q
+    void addFv(Vector3d const &Fv) {m_Fv+=Fv;}             // N/q
+
     double fffx() const {return m_Fff.x;}
     double fffy() const {return m_Fff.y;}
     double fffz() const {return m_Fff.z;}
@@ -134,7 +147,8 @@ struct FL5LIB_EXPORT  AeroForces
     double fsumz() const {return m_Fsum.z;}
 
     double viscousDrag() const {return m_ProfileDrag + m_FuseDrag + m_ExtraDrag;}  //N/q
-    Vector3d viscousDragForce() const {return m_CFWind.Idir()*(m_ProfileDrag + m_FuseDrag + m_ExtraDrag);}  //N/q
+    /** The viscous force in body axes (N/q): the drag along the wind and the part of Fv across it, which a body rate gives the strips' drag */
+    Vector3d viscousDragForce() const {return m_CFWind.Idir()*(m_ProfileDrag + m_FuseDrag + m_ExtraDrag) + (m_Fv - m_CFWind.Idir()*m_Fv.dot(m_CFWind.Idir()));}
 
     double profileDrag() const {return m_ProfileDrag;}  //N/q
     void setProfileDrag(double d) {m_ProfileDrag=d;}
@@ -178,6 +192,7 @@ struct FL5LIB_EXPORT  AeroForces
 
         Vector3d m_Mi;                /**< The moment of pressure forces w.r.t. polar COG in body axes (N.m/q) */
         Vector3d m_Mv;                /**< The moment of viscous  forces w.r.t. polar COG in body axes (N.m/q) */
+        Vector3d m_Fv;                /**< The resultant of the viscous forces in body axes (N/q), the force of m_Mv; its wind-axis x component is m_ProfileDrag+m_FuseDrag */
 
         CartesianFrame m_CFWind;      /**< the Cartesian frame defining the wind axes;
                                              x aft aligned with wind, y unchanged, z perpendicular to x and pointing up;

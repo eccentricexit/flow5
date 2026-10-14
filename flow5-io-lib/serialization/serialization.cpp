@@ -5972,7 +5972,7 @@ bool serial::serializeAeroForcesFl5(AeroForces &AF, QDataStream &ar, bool bIsSto
         ar << ArchiveFormat;
         ar << AF.alpha() << AF.beta() << AF.qInf();
         ar << AF.refArea() << AF.refChord() << AF.refSpan();
-        ar << dble << dble << dble;  // formerly CP
+        ar << AF.Fv().x << AF.Fv().y << AF.Fv().z;  // formerly CP (zeros since 500750, which a reader ignores); now the viscous force, whose moment is Mv
         ar << AF.Fff().x<<AF.Fff().y<<AF.Fff().z;
         ar << AF.Fsum().x<<AF.Fsum().y<<AF.Fsum().z;
         ar << AF.profileDrag() << AF.fuseDrag() << AF.extraDrag();
@@ -5990,7 +5990,8 @@ bool serial::serializeAeroForcesFl5(AeroForces &AF, QDataStream &ar, bool bIsSto
         ar >> d0 >> d1 >> d2;
         AF.setReferenceDims(d0, d1, d2);
 
-        ar >> dble >> dble >> dble; // formerly CP
+        ar >> d0 >> d1 >> d2; // formerly CP; since 500750 the viscous force Fv (zeros in a file written before, or by upstream: Cy then lacks the drag's y part)
+        if(ArchiveFormat>=500750) AF.setFv({d0, d1, d2});
 
         ar >> d0 >> d1 >> d2;
         AF.setFff({d0, d1, d2});

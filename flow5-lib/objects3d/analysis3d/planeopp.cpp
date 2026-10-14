@@ -281,10 +281,10 @@ void PlaneOpp::getProperties(Plane const *pPlane, PlanePolar const *pWPolar, std
     strong  = "ICD = " +  std::format(" {:13.7f}", m_AF.CDi());
     props += strong +"\n";
 
-    strong  = "CY  = " +  std::format(" {:13.7f}", m_AF.Cy());
+    strong  = "CY  = " +  std::format(" {:13.7f}", m_AF.Cy()+m_AF.Cyv());
     props += strong +"\n";
 
-    strong  = "Cl  = " +  std::format(" {:13.7f}", m_AF.Cli());
+    strong  = "Cl  = " +  std::format(" {:13.7f}", m_AF.Cl());
     props += strong +"\n";
 
     strong  = "Cm  = " +  std::format(" {:13.7f}", m_AF.Cm());
@@ -1032,10 +1032,10 @@ void PlaneOpp::exportMainDataToString(Plane const*pPlane, std::string &poppdata,
 
     strange = std::format("{:17g}", m_AF.CL());     sstr << strange+sep;
     strange = std::format("{:17g}", m_AF.CD());     sstr << strange+sep;
-    strange = std::format("{:17g}", m_AF.Cy());     sstr << strange+sep;
+    strange = std::format("{:17g}", m_AF.Cy()+m_AF.Cyv());     sstr << strange+sep;
     strange = std::format("{:17g}", m_AF.CDi());    sstr << strange+sep;
     strange = std::format("{:17g}", m_AF.CDv());    sstr << strange+sep;
-    strange = std::format("{:17g}", m_AF.Cli());    sstr << strange+sep;
+    strange = std::format("{:17g}", m_AF.Cl());     sstr << strange+sep;
     strange = std::format("{:17g}", m_AF.Cmi());    sstr << strange+sep;
     strange = std::format("{:17g}", m_AF.Cmv());    sstr << strange+sep;
     strange = std::format("{:17g}", m_AF.Cni());    sstr << strange+sep;
