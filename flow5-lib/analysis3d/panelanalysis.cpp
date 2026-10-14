@@ -863,15 +863,18 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
-        // Thin surfaces: the sideslip derivatives follow the physics of a wing in sideslip (uav#79), in three parts.
+        // The sideslip derivatives follow the physics of a wing in sideslip (uav#79; thick surfaces uav#80), in three parts.
         // 1. The wake leaves the trailing edges along the free stream: in a sideslip of the angle theta it is yawed by theta from the body x axis, which changes
         //    the circulation. To first order, mu(V+) = mu_linear(V+) + theta dmu and mu(V-) = mu_linear(V-) - theta dmu, with dmu = -A^-1 (dA_wake/dtheta) mu0,
         //    A the influence matrix of the x-aligned wake and mu0 the solution of the reference state. The derivative of the wake's rows is a central
         //    difference between the wake yawed by +-0.01 rad: far larger than theta so that the quadrature noise of the integrals is not amplified.
         // 2. The far-field force has its Trefftz plane perpendicular to that wake (m_bSideslipFarField), and CY is taken from it.
-        // 3. The free-stream force on the sheet's vorticity is applied where the vorticity is (m_bSideslipVorticity).
-        // Thick surfaces keep the older model for now: the sheet's vorticity is the thickness' as well, which the free stream alone does not load.
-        bool bSideslipModel = !hasThickSurfaces();
+        // 3. The free-stream force on the sheet's vorticity is applied where the vorticity is (m_bSideslipVorticity). On thick surfaces the vorticity of the
+        //    closed surface is the thickness' as well, which the free stream alone does not load (Clb 0.25 against 0.13 thin on one wing): the force is put
+        //    on the lifting vorticity, the jump mu_top - mu_bottom on the strips' mean surface (P3Analysis::meanSheetVorticityLoad(), uav#80).
+        //    Left out on thick surfaces, as on the thin sheet and in AVL: the moment of the fluid's impulse, -V x (M_a V), which a body of thickness
+        //    carries in a translation (Munk's moment; flow5tools/dev/addedmass.py measures it).
+        bool const bSideslipModel = true;
         if(bSideslipModel)
         {
             std::vector<double> yawProduct;
@@ -918,7 +921,7 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         m_bSideslipFarField = false;
     }
     SD.Yv = (Forcem - Forcep).dot(js)   /deltaspeed/2.0;
-    // the on-body pressure moment picks up a spurious response to lateral perturbations (cf. issue #7):
+    // the on-body pressure moment picks up a spurious response to lateral perturbations with the wake held along x (cf. issue #7):
     // the roll and yaw derivatives are based on the moment of the far-field strip forces instead
     SD.Lv = (MomentFFm - MomentFFp).dot(is) /deltaspeed/2.0;
     SD.Nv = (MomentFFm - MomentFFp).dot(ks) /deltaspeed/2.0;

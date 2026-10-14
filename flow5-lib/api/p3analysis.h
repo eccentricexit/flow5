@@ -93,6 +93,10 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
         void forces(const double *Mu3, const double *Sigma3, double alpha, double beta, const Vector3d &CoG, bool bFuseMi, std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment) override;
         void sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment) const;
+        bool thickStripChain(int i3, std::vector<int> &chain, int &NX) const;
+        bool thickStripLiftPressureForce(int i3, std::vector<Vector3d> const &panelForce, Vector3d &FP) const;
+        void meanSheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, Vector3d &Force, Vector3d &Moment,
+                                    std::vector<int> &irregular) const;
         void inducedForce(int nPanel3, double QInf, double alpha, double beta, int pos3, Vector3d &ForceBodyAxes, SpanDistribs &distribFF) const override;
         void makeTrefftzStrips(double const *mu3, Vector3d const &wakedir, std::vector<TrefftzStrip> &strips) const;
         void trefftzDrag(int nPanel3, double QInf, double alpha, double beta, int pos3, Vector3d &Drag, SpanDistribs &distribFF, bool bTrefftzPlane) const override;
@@ -137,7 +141,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         void makeStateCp(std::vector<double> const &sol, std::vector<Vector3d> const &field, double QInf, double alpha);
         bool makeYawedWakeCorrection(std::vector<double> const &sol0, std::vector<double> &dsol);
         void stateFarField(std::vector<double> const &sol, std::vector<Vector3d> const &field, double alpha, Vector3d const &CoG, bool bFuseMi, bool bSideslipModel,
-                           Vector3d &Force, Vector3d &Moment);
+                           Vector3d &Force, Vector3d &Moment, Vector3d *pOnBodyMoment=nullptr);
         /** The local onset velocities (m/s) of a steady rotating point, per panel, that inducedForce() applies at the strips; empty for a point without rates. */
         void setOnset(std::vector<Vector3d> const &field) {m_Onset=field;}
         void clearOnset() {m_Onset.clear();}
