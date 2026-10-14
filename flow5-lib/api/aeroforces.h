@@ -84,10 +84,9 @@ struct FL5LIB_EXPORT  AeroForces
     double CDv()   const {return m_RefArea>MINREFAREA ? (m_ProfileDrag+m_FuseDrag+m_ExtraDrag)/m_RefArea    : 0.0;}
     double CD()    const {return CDi()+CDv();}
 
-    // The profile drag's force across the wind is a side force: Fv is the strips' drag along their local flow
-    // (which a body rate tilts away from the free stream), summed; the part of it across the wind is zero without body rates,
-    // and its y component in body axes is the viscous part of Cy (the drag along the wind is in CDv, as the induced drag is in CDi)
-    double Cyv() const {return m_RefArea>MINREFAREA ? (m_Fv - m_CFWind.Idir()*m_Fv.dot(m_CFWind.Idir())).y/m_RefArea : 0.0;} // in Body axes
+    // Fv is the strips' drag along their local flow, summed: a force vector like Fff, so its y component is the viscous part of Cy
+    // (Cy()+Cyv() is the y component of the total, and with a sideslip it includes the drag's projection, -CDv sin(beta) as Fff has the induced drag's)
+    double Cyv() const {return m_RefArea>MINREFAREA ? m_Fv.y/m_RefArea : 0.0;} // in Body axes
 
     // The roll such that the starboard wing goes down is >0
     // Opposite to algebraic result in body axis
