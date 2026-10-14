@@ -671,13 +671,14 @@ Vector3d P3Analysis::stripSuctionCorrection(Panel3 const &p3, Vector3d const &F,
 
 
 /**
- * The change that the strips' leading-edge suction (stripSuctionCorrection()) makes to the far-field force (N) and to the on-body moment (N.m, about
- * the CoG; on thin strips the leading-edge force is applied at the leading edge, as in forces()) of a steady rotating state of a polar point
- * (PlaneTask::solveRatePoint()): the change in the state with the body rates, solution sol and onset field, less the change in the state of the same
- * free stream V without rates. A state without rotation keeps its far-field force (see forces(), rule 1), so only the part due to the rotation is added,
- * and a point with small rates differs from the point without by the rate derivatives times the rates, as forces() makes them. With sideslip, sol
- * and sol0 are the plain solutions, without the yawed wake's change that PlaneTask::applySideslipModel() adds: the two changes are superposed
- * (forces(), rule 3), exact to first order in beta and the rates.
+ * The change that the strips' leading-edge suction (stripSuctionCorrection()) makes to the far-field force (N) and to the moment (N.m, about the CoG)
+ * of a steady rotating state of a polar point (PlaneTask::solveRatePoint()): the change in the state with the body rates, solution sol and onset
+ * field, less the change in the state of the same free stream V without rates. A state without rotation keeps its far-field force (see forces(),
+ * rule 1), so only the part due to the rotation is added. The moment's change is placed as the rate derivatives place it (forces(), rule 2): its
+ * rolling and yawing parts are those of m_MomentFF, the change at the strip's quarter-chord point, its pitching part that of m_MomentFF +
+ * m_MomentLocal, as Mq; so a point with small rates differs from the point without by the rate derivatives times the rates. sol and sol0 are the
+ * plain solutions, without the yawed wake's change that PlaneTask::applySideslipModel() adds: the two changes are superposed (forces(), rule 3),
+ * exact to first order in beta and the rates.
  */
 void P3Analysis::stateSuctionChange(std::vector<double> const &sol, std::vector<Vector3d> const &field, Vector3d const &V, double alpha, Vector3d const &CoG,
                                     bool bFuseMi, Vector3d &dForce, Vector3d &dMoment)
@@ -705,12 +706,13 @@ void P3Analysis::stateSuctionChange(std::vector<double> const &sol, std::vector<
         Vector3d F, M;
         m_bRotationSuction = false;
         forces(mu3.data(), sigma.data(), alpha, 0.0, CoG, bFuseMi, f, F, M);
-        Vector3d FF0 = m_ForceFF, M0 = M;
+        Vector3d FF0 = m_ForceFF, MFF0 = m_MomentFF, ML0 = m_MomentLocal;
         m_bRotationSuction = true;
         forces(mu3.data(), sigma.data(), alpha, 0.0, CoG, bFuseMi, f, F, M);
         double sign = k==0 ? 1.0 : -1.0;
+        Vector3d dMFF = m_MomentFF - MFF0, dML = m_MomentLocal - ML0;
         dForce  += (m_ForceFF - FF0) * sign;
-        dMoment += (M - M0) * sign;
+        dMoment += Vector3d(dMFF.x, dMFF.y + dML.y, dMFF.z) * sign;
     }
     m_bFarField = bFarField;
     m_bRotationSuction = bRotation;
@@ -1542,7 +1544,8 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     //    force-free wake; flow5's wake is the straight one of the polar. A rotating onset V + Omega x r is not uniform, the far field is no longer
     //    the total, and the near-field force of thin-wing theory is taken.
     // 2. The change sits where the strip's force sits in each moment: the quarter-chord point in m_MomentFF, the leading-edge force in the pitch
-    //    damping's m_MomentLocal. Basis: m_MomentFF lumps every strip's far-field force there; moving the suction alone to the leading edge, its true
+    //    damping's m_MomentLocal; the steady rotating points take their moment's change the same way (stateSuctionChange()), so that a point and
+    //    the derivatives agree. Basis: m_MomentFF lumps every strip's far-field force there; moving the suction alone to the leading edge, its true
     //    point of action, turned Cnp/CL positive on swept wings of aspect ratio 1.34 (+0.012 and +0.032 against AVL's -0.018 and -0.058 at 100
     //    chordwise vortices, the wind tunnel's -0.38 and -0.56). Limit: Cnp and Cnr carry no leading-edge lever for the suction until the
     //    near-field moment (flow5#29) puts every load where it acts.
