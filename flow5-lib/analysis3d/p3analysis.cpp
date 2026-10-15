@@ -1322,10 +1322,25 @@ bool P3Analysis::thickStripLiftPressureForce(int i3, std::vector<Vector3d> const
 
 
 /**
+ * The unit normal n of a strip's chord plane (uav#198): the plane of the chord, from the trailing edge's midpoint of the strip's trailing panel pTrailing to its
+ * quarter-chord point QP, and of the span along that trailing edge. Its sign is not set: m_MomentLift takes it twice. False for a degenerate strip.
+ */
+bool P3Analysis::stripChordNormal(Panel3 const &pTrailing, Vector3d const &QP, Vector3d &n) const
+{
+    Vector3d span = pTrailing.rightTrailingNode() - pTrailing.leftTrailingNode();
+    Vector3d chord = QP - (pTrailing.leftTrailingNode() + pTrailing.rightTrailingNode())*0.5;
+    n = chord * span;
+    if(n.norm()<1.0e-12) return false;
+    n.normalize();
+    return true;
+}
+
+
+/**
  * The moment about QP (N.m/rho) of a thick strip's load normal to its chord plane, cell by cell (m_MomentLift, uav#198): per chordwise cell, the panel forces
  * of the bottom cell and of the top cell facing it, panelForce (N/rho per panel), projected on the normal of the strip's chord plane and placed at the
- * area-weighted centre of the four panels. The chord plane holds the chord, from the trailing edge's midpoint to the quarter-chord point QP, and the span along the
- * trailing edge; it is the plane of the leading-edge suction and of the thickness' in-plane pressures, which stay at QP (P3Analysis::forces(), rule 2).
+ * area-weighted centre of the four panels (stripChordNormal()); the in-plane pressures, the leading-edge suction and the thickness', stay at QP
+ * (P3Analysis::forces(), rule 2).
  * Not the cells' own mean-surface normal: at the nose both faces look forward and the mesh's leading-edge node need not lie on the mean surface, so that
  * normal tilts towards the suction (by 0.05 on the leading-edge cells of a 45 deg NACA 0012 wing, whose leading-edge node is 0.4 mm above the chord) and
  * takes a part of it in. False if the strip's chain is not regular.
@@ -1336,12 +1351,8 @@ bool P3Analysis::thickStripLiftMoment(int i3, std::vector<Vector3d> const &panel
     std::vector<int> chain;
     int NX = 0;
     if(!thickStripChain(i3, chain, NX)) return false;
-    Panel3 const &p3 = m_Panel3.at(i3);
-    Vector3d span = p3.rightTrailingNode() - p3.leftTrailingNode();
-    Vector3d chord = QP - (p3.leftTrailingNode() + p3.rightTrailingNode())*0.5;   // its sign does not matter: n enters twice
-    Vector3d n = chord * span;
-    if(n.norm()<1.0e-12) return false;
-    n.normalize();
+    Vector3d n;
+    if(!stripChordNormal(m_Panel3.at(i3), QP, n)) return false;
     for(int c=0; c<NX; c++)
     {
         int cell[4] = {chain[2*c], chain[2*c+1], chain[2*(2*NX-1-c)], chain[2*(2*NX-1-c)+1]};
@@ -1790,6 +1801,11 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
 
     Moment.set(0.0,0.0,0.0);
 
+    // m_MomentLift's normal: each strip's chord-plane normal (stripChordNormal()); zero for a degenerate strip, which adds nothing
+    std::vector<Vector3d> stripNc(m_bFarField ? stripFF.size() : 0);
+    for(unsigned int is=0; is<stripNc.size(); is++)
+        if(!stripChordNormal(m_Panel3.at(stripTP[is]), stripQP[is], stripNc[is])) stripNc[is].set(0.0, 0.0, 0.0);
+
     // the rotating states' suction rule and m_MomentLift need the panel forces of the thick strips (thickStripLiftPressureForce())
     bool bThickFF = false;
     if(m_bFarField)
@@ -1813,7 +1829,11 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 int iStrip = stripOfPanel[i3];
                 stripFP[iStrip] += PanelForce;   // N/rho
                 m_MomentLocal += (p3.CoG() - stripQP[iStrip]) * PanelForce * m_pPolar3d->density();   // N.m
-                if(stripThin[iStrip]) m_MomentLift += (p3.CoG() - stripQP[iStrip]) * PanelForce * m_pPolar3d->density();   // N.m: a thin panel's force is normal to the sheet
+                if(m_bFarField && stripThin[iStrip])
+                {
+                    Vector3d const &nc = stripNc[iStrip];
+                    m_MomentLift += (p3.CoG() - stripQP[iStrip]) * (nc * PanelForce.dot(nc)) * m_pPolar3d->density();   // N.m
+                }
             }
             // the far-field strip forces only cover the wings: the fuse keeps its on-body pressure moment
             if(m_bFarField && p3.isFusePanel()) m_MomentFF += PanelLeverArm * PanelForce * m_pPolar3d->density();  // N.m
@@ -1882,24 +1902,23 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
         m_MomentLocal += (stripLE[is] - stripQP[is]) * leforce;   // N.m
     }
 
-    // m_MomentLift (uav#198): the strips' load normal to the mean surface where it acts, the in-plane suction left at the quarter-chord point (rule 2 above).
-    // Basis: the far-field strip forces at the quarter-chord points carry no chordwise lever, and a rate whose onset varies along the chord (a yaw rate on a
-    // fin, as a pitch rate on a wing) loads the strip aft of it: a fin's Cnr read 0.84 of AVL's, its Cnp 1.08. The normal load is the pressure jump, at the
-    // panels, and on thin strips the part the panels under-integrate near the leading edge, the normal part of the leading-edge force, at the leading edge,
-    // as in Cm and Mq, the normal that of the suction's frame (stripSuctionFrame()), so the suction's change (rule 1), in that plane, does not move it.
-    // Thick strips: the cells' load normal to the strip's chord plane, each at its cell (thickStripLiftMoment()), the in-plane pressures (suction and
-    // thickness) at the quarter-chord point.
+    // m_MomentLift (uav#198): each strip's load normal to its chord plane (stripChordNormal()) where it acts, about the quarter-chord point; what lies in
+    // that plane stays at the quarter-chord point (rule 2 above). Basis: the far-field strip forces at the quarter-chord points carry no chordwise lever, and
+    // a rate whose onset varies along the chord (a yaw rate on a fin, as a pitch rate on a wing) loads the strip aft of it: a fin's Cnr read 0.84 of AVL's,
+    // its Cnp 1.08. The normal load is the pressures' part along the normal, at the panels, and on thin strips the part the panels under-integrate near the
+    // leading edge, the leading-edge force's, at the leading edge, as in Cm and Mq; thick strips cell by cell (thickStripLiftMoment()). One normal a
+    // strip: the in-plane parts are the suction (rule 2), the thickness' pressures, and a cambered panel's own tilt, whose axial force with the triangles'
+    // spanwise offsets inside the strip moved the cambered swept flying wing's Cnp 3 percent (uav#200's mesh, not a lever). The suction's change (rule 1)
+    // lies along the span, in the plane, and does not move it.
     if(m_bFarField)
     {
         for(unsigned int is=0; is<stripFF.size(); is++)
         {
-            Panel3 const &p3 = m_Panel3.at(stripTP[is]);
             if(stripThin[is])
             {
-                Vector3d n, e, t, d, ptLE;
-                if(!stripSuctionFrame(p3, n, e, t, d, ptLE)) n = p3.normal();
+                Vector3d const &nc = stripNc[is];
                 Vector3d leforce = stripFF[is] - stripFP[is] * m_pPolar3d->density();   // N
-                m_MomentLift += (stripLE[is] - stripQP[is]) * (n * leforce.dot(n));   // N.m
+                m_MomentLift += (stripLE[is] - stripQP[is]) * (nc * leforce.dot(nc));   // N.m
             }
             else
             {

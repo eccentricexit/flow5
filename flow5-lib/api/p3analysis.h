@@ -96,6 +96,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         bool thickStripChain(int i3, std::vector<int> &chain, int &NX) const;
         bool thickStripLiftPressureForce(int i3, std::vector<Vector3d> const &panelForce, Vector3d &FP) const;
         bool thickStripLiftMoment(int i3, std::vector<Vector3d> const &panelForce, Vector3d const &QP, Vector3d &M) const;
+        bool stripChordNormal(Panel3 const &pTrailing, Vector3d const &QP, Vector3d &n) const;
         void meanSheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, Vector3d &Force, Vector3d &Moment,
                                     std::vector<int> &irregular) const;
         void inducedForce(int nPanel3, double QInf, double alpha, double beta, int pos3, Vector3d &ForceBodyAxes, SpanDistribs &distribFF) const override;
