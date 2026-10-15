@@ -1116,11 +1116,13 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         }
         computeOnBodyCp(VField.at(0), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+0*N, alphaeq, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
-        Momentp = m_MomentFF;
+        Momentp = m_MomentFF + m_MomentLift;
         computeOnBodyCp(VField.at(3), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+3*N, alphaeq, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
-        Momentm = m_MomentFF;
+        Momentm = m_MomentFF + m_MomentLift;
     }
+    // the triangle methods' p and r moments: the far-field strip forces at the quarter-chord points plus the strips' normal load where it acts
+    // (m_MomentLift, uav#198), the suction left at the quarter-chord points (P3Analysis::forces(), rule 2); the q moment takes the whole chordwise load
     SD.Yp = (Forcep -Forcem ).dot(js) /rotationrate/2.0;
     SD.Lp = (Momentp-Momentm).dot(is) /rotationrate/2.0;
     SD.Np = (Momentp-Momentm).dot(ks) /rotationrate/2.0;
@@ -1202,10 +1204,10 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         }
         computeOnBodyCp(VField.at(2), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+2*N, alphaeq, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
-        Momentp = m_MomentFF;
+        Momentp = m_MomentFF + m_MomentLift;
         computeOnBodyCp(VField.at(5), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+5*N, alphaeq, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
-        Momentm = m_MomentFF;
+        Momentm = m_MomentFF + m_MomentLift;
     }
 
     SD.Yr = (Forcep -Forcem ).dot(js) /rotationrate/2.0;
