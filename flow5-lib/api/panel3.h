@@ -434,8 +434,8 @@ inline Vector3d Panel3::midTrailingPoint() const
 /**
  * The midpoint of the leading edge of the strip this panel ends: to be called on the last panel of a strip walked upstream
  * from its trailing panel via the iPU links, see Surface::makeTriPanels().
- * That triangle is the upper triangle of the leading cell, with nodes (LA, TA, LB) or (TB, LB, LA) for a mid-surface
- * left or right panel, and (LA, LB, TA) or (LA, LB, TB) for the bottom of a thick surface.
+ * That triangle is the upstream triangle of the leading cell, with nodes (LA, C, LB) or (C, LB, LA) for a mid-surface
+ * left or right panel, and (LA, LB, C) for the bottom of a thick surface, C the cell's centre node (uav#200).
  */
 inline Vector3d Panel3::leadingEdgeMidpoint() const
 {
