@@ -95,7 +95,8 @@ class FL5LIB_EXPORT P4Analysis : public PanelAnalysis
 
 
         void forces(double const *Mu, double const *Sigma, double alpha, double beta, Vector3d const&CoG, bool bFuseMi, const std::vector<Vector3d> &VInf, Vector3d &Force, Vector3d &Moment) override;
-        void boundVortexLoad(double const *Mu4, double const *Sigma4, std::vector<Vector3d> const &VInf, Vector3d const &CoG, Vector3d &Force, Vector3d &Moment) const;
+        void boundVortexLoad(double const *Mu4, double const *Sigma4, std::vector<Vector3d> const &VInf, Vector3d const &CoG, Vector3d &Force, Vector3d &Moment,
+                             std::vector<Vector3d> *panelMoment=nullptr) const;
         bool yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product) override;
         int yawedWakeRowsKept() const {return m_nYawedWakeRowsKept;}
 

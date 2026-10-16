@@ -1024,8 +1024,11 @@ void P4Analysis::VLMGetVortexInfluence(Panel4 const &p4, Vector3d const &C, doub
 *    induces at the bound vortices is the unyawed lattice's, as the triangle methods take the induced part from the Trefftz plane: with the
 *    yawed legs there, Cnb over the classical wing value (NACA TN 1581 eq 21) grew with the aspect ratio, 1.8 at A 10 and 2.1 at A 40
 *    unswept, where it should tend to 1 (1.38 and 1.13 without, the triangle methods 1.30 and 1.08).
-* 4. Nothing else changes: the force returned without rotation, the on-body moment (Cm, the u and w derivatives, the neutral point) and the
-*    polar's own forces are the far-field force and the on-body moment as before.
+* 4. The moment of every other state (the polar's Cm through PlaneTask::computePlane(), the u and w derivatives, so Cma and the neutral
+*    point; uav#187) is the near-field load's too. Basis: the on-body moment crosses each bound vortex with the free-stream direction only,
+*    which leaves out the force of the induced velocity on it, the induced drag and its lever: a wing with dihedral or sweep has one in
+*    pitch (AVL's Cm is the near-field load's, SFFORC). Then Cm, Cma and Cm_de share one model. The forces stay the far-field ones
+*    (rule 2's momentum argument) except in rotation.
 * @param Mu a pointer to the array of doublet strengths or vortex circulations
 * @param Sigma a pointer to the array of source strengths
 * @param VInf a reference to the array of the velocity vectors on the panels
@@ -1209,13 +1212,14 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
     if(m_pPolar3d->isVLM()) m_MomentFF = Moment;              // the on-body moment is vortex-based for VLM: keep it
     else                    m_MomentFF *= m_pPolar3d->density(); // N.m
 
-    // VLM2's derivatives: the near-field load of the lattice (rules 1 to 3 above); a fuse keeps its on-body moment
-    if(m_pPolar3d->isVLM2() && m_bFarField)
+    // VLM2: the moment of the near-field load of the lattice (rules 1 to 4 above); a fuse keeps its on-body moment
+    if(m_pPolar3d->isVLM2())
     {
         Vector3d ForceNF, MomentNF;
         boundVortexLoad(Mu4, Sigma4, VInf, CoG, ForceNF, MomentNF);
         m_MomentFF = MomentNF + FuseMoment * m_pPolar3d->density();
-        if(m_bRotationSuction)
+        Moment = m_MomentFF;
+        if(m_bFarField && m_bRotationSuction)
         {
             Force = ForceNF;
             m_ForceFF = ForceNF;
@@ -1232,10 +1236,10 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
  * The chordwise legs and the trailing legs carry no force (AVL's default, LTRFORCE), except in the sideslip derivatives
  * (m_bSideslipVorticity): there the free-stream force of each ring's chordwise legs on the sheet, up to the trailing edge, is added at their
  * midpoints, the vorticity load of the triangle methods (uav#79). Thin panels only (VLM2); fuse panels are left out.
- * Force (N) and Moment (N.m, about CoG).
+ * Force (N) and Moment (N.m, about CoG); panelMoment, when given, each panel's share of the moment (N.m, about CoG, zero off the mid-surface).
  */
 void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::vector<Vector3d> const &VInf, Vector3d const &CoG,
-                                 Vector3d &Force, Vector3d &Moment) const
+                                 Vector3d &Force, Vector3d &Moment, std::vector<Vector3d> *panelMoment) const
 {
     int N = nPanels();
     std::vector<Vector3d> F(N), M(N);
@@ -1284,6 +1288,11 @@ void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::v
     }
     Force  *= m_pPolar3d->density();     // N
     Moment *= m_pPolar3d->density();     // N.m
+    if(panelMoment)
+    {
+        panelMoment->resize(N);
+        for(int p=0; p<N; p++) (*panelMoment)[p] = M[p] * m_pPolar3d->density();
+    }
 }
 
 
