@@ -1351,9 +1351,6 @@ void PlaneOpp::exportPanel3DataToString(Plane const *pPlane, PlanePolar const *p
 
     if(pPlaneXfl)
     {
-        int coef = 1;
-        if(!pWPolar->bThinSurfaces())  coef = 2;
-
         out << std::setw(17) <<  "Panel";       out << sep;
         out << std::setw(17) << "CtrlPt.x";     out << sep;
         out << std::setw(17) << "CtrlPt.y";     out << sep;
@@ -1383,7 +1380,7 @@ void PlaneOpp::exportPanel3DataToString(Plane const *pPlane, PlanePolar const *p
                     iStrip++;
                     out << std::format("Strip {:d}\n", iStrip);
 
-                    for(int l=0; l<surf.NXPanels() * coef *2; l++)
+                    for(int l=0; l<surf.nStripPanel3(!pWPolar->bThinSurfaces()); l++) // Surface::makeTriPanels()
                     {
                         Panel3 const &p3 = pPlaneXfl->panel3At(pPlaneXfl->wingAt(iw)->firstPanel3Index() + p);
 

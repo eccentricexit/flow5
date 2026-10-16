@@ -1029,7 +1029,6 @@ void PlaneTask::addTwistedVelField(double QInf, double alpha, std::vector<Vector
     int iPanel = 0;
 
     int coef = m_pPlPolar->bThinSurfaces() ? 1 : 2; // top and bottom surfaces
-    if(m_pPlPolar->isTriangleMethod()) coef *= 2; // 2 triangles/quad
     for(int iw=0; iw<pPlaneXfl->nWings(); iw++)
     {
         WingXfl const *pWing = pPlaneXfl->wingAt(iw);
@@ -1056,7 +1055,8 @@ void PlaneTask::addTwistedVelField(double QInf, double alpha, std::vector<Vector
             {
                 double alfa = alpha + m_gamma.at(iStrip);
                 Vector3d VStrip(QInf * cos(alfa*PI/180.0), 0.0, QInf * sin(alfa*PI/180.0));
-                for(int ix=0; ix<surf.NXPanels()*coef; ix++)
+                int nStripPanels = m_pPlPolar->isTriangleMethod() ? surf.nStripPanel3(m_pPlPolar->bThickSurfaces()) : surf.NXPanels()*coef; // Surface::makeTriPanels()
+                for(int ix=0; ix<nStripPanels; ix++)
                 {
                     if(m_pPA->panelAt(iPanel)->isSidePanel()) continue; // case of a middle gap with thick surfaces
                     VField[iPanel] = VStrip;

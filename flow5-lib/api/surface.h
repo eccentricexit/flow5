@@ -246,6 +246,15 @@ class FL5LIB_EXPORT Surface
         void makePanelNodes(std::vector<Node> &nodes, bool bMakeLeftNodes, bool bMidSurface) const;
 
         void makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &nodes, int ip3start, bool bThickSurfaces, int nTipStrips, int &leftnodeidx, int &rightnodeindex);
+
+        /** The triangle mesh of a strip (makeTriPanels(), uav#200): its cells, l = 0 at the bottom (or mid) trailing edge round the leading edge to the top
+         *  trailing edge, are split in two along a diagonal, except the trailing cells, split in four about a centre node, so that the trailing triangle,
+         *  whose doublet the Kutta condition sheds into the wake, is centred on the strip. */
+        bool isTrailingCell(int l, bool bThickSurfaces) const {return l==0 || (bThickSurfaces && l==2*m_NXPanels-1);}
+        int nCellPanel3(int l, bool bThickSurfaces) const {return isTrailingCell(l, bThickSurfaces) ? 4 : 2;}
+        int nStripPanel3(bool bThickSurfaces) const;
+        bool isCellCentreNode(int iNode) const {return iNode>=m_FirstCentreNode && iNode<m_FirstCentreNode+m_nCentreNodes;}
+        void recentreCellNodes(std::vector<Panel3> const &panel3, std::vector<Node> &node) const;
         int makeQuadPanels(std::vector<Panel4> &panel4list, int &nWakeColumn, bool bThickSurface, int nTipStrips);
 
         int isNode(Vector3d const &Pt, std::vector<Panel4> const & panel4list) const;
@@ -341,6 +350,7 @@ class FL5LIB_EXPORT Surface
         std::vector<int> m_Panel3List;    /**< the list of panel3 indexes of this surface */
         std::vector<int> m_Panel4List;    /**< the list of panel4 indexes of this surface */
         int m_FirstStripPanelIndex, m_LastStripPanelIndex; /**< temporary fields used to connect center-left and center-right surfaces */
+        int m_FirstCentreNode, m_nCentreNodes; /**< the trailing cells' centre nodes, made by makeTriPanels(), in the node array it was given */
 
 
         Vector3d m_LA;              /**< the Surface's leading left point */

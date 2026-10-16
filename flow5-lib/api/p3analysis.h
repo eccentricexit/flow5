@@ -93,7 +93,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
         void forces(const double *Mu3, const double *Sigma3, double alpha, double beta, const Vector3d &CoG, bool bFuseMi, std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment) override;
         void sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment) const;
-        bool thickStripChain(int i3, std::vector<int> &chain, int &NX) const;
+        bool thickStripChain(int i3, std::vector<int> &chain, std::vector<int> &cellStart) const;
         bool thickStripLiftPressureForce(int i3, std::vector<Vector3d> const &panelForce, Vector3d &FP) const;
         bool thickStripLiftMoment(int i3, std::vector<Vector3d> const &panelForce, Vector3d const &QP, Vector3d &M) const;
         bool stripChordNormal(Panel3 const &pTrailing, Vector3d const &QP, Vector3d &n) const;

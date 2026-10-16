@@ -870,7 +870,6 @@ bool WingXfl::hasCenterGap() const
  * because the fuselage may or may not separate completely the surfaces */
 bool WingXfl::connectInnerSurfaces(std::vector<Panel3> &panels, bool bThickSurfaces)
 {
-    int coef = bThickSurfaces ? 2 : 1;
     for(int is=0; is<nSurfaces()-1; is++)
     {
         Surface const &sl = m_Surface.at(is);
@@ -888,7 +887,7 @@ bool WingXfl::connectInnerSurfaces(std::vector<Panel3> &panels, bool bThickSurfa
         // this is done by setting the right side panels' node indexes to those of the left side panels;
         // 1 or two vertices are assigned for each right side panel
         // leaves some nodes of the right surface dangling, but they can be kept unused in the array
-        for(int ir=0; ir<sr.NXPanels()*2*coef; ir++)  // top and bottom * 2 triangles
+        for(int ir=0; ir<sr.nStripPanel3(bThickSurfaces); ir++)  // the triangles of the first strip, top and bottom
         {
             int nr = sr.m_FirstStripPanelIndex + ir;
             if(nr<0 || nr>=int(panels.size()))
@@ -896,7 +895,7 @@ bool WingXfl::connectInnerSurfaces(std::vector<Panel3> &panels, bool bThickSurfa
                 return false;
             }
             Panel3 &pr = panels[nr];
-            for(int il=0; il<sl.NXPanels()*2*coef; il++)  // top and bottom * 2 triangles
+            for(int il=0; il<sl.nStripPanel3(bThickSurfaces); il++)  // the triangles of the last strip, top and bottom
             {
                 int nl = sl.m_LastStripPanelIndex + il;
                 Panel3 &pl = panels[nl];
@@ -915,6 +914,8 @@ bool WingXfl::connectInnerSurfaces(std::vector<Panel3> &panels, bool bThickSurfa
                     {
                         for(int ivl=0; ivl<3; ivl++)
                         {
+                            // a trailing cell's centre node lies inside its cell, half a strip from the junction: never the same node (uav#200)
+                            if(sr.isCellCentreNode(pr.vertexAt(ivr).index()) || sl.isCellCentreNode(pl.vertexAt(ivl).index())) continue;
                             if(pr.vertexAt(ivr).isSame(pl.vertexAt(ivl), 0.0005))
                             {
                                 pr.setVertex(ivr, pl.vertexAt(ivl));// could also only set the index
@@ -952,8 +953,6 @@ bool WingXfl::connectInnerSurfaces(std::vector<Panel3> &panels, bool bThickSurfa
 
 bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, bool bConnectFlaps, bool bThickSurfaces)
 {
-    int coef = bThickSurfaces ? 2 : 1;
-
     if(iSurf<0 || iSurf+1>=nSurfaces()) return false; // error
 
     Surface const &sl = m_Surface.at(iSurf);
@@ -969,7 +968,7 @@ bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, 
     // this is done by setting the right side panels' node indexes to those of the left side panels;
     // 1 or two vertices are assigned for each right side panel
     // leaves some nodes of the right surface dangling, but they can be kept unused in the array
-    for(int ir=0; ir<sr.NXPanels()*2*coef; ir++)  // top and bottom * 2 triangles
+    for(int ir=0; ir<sr.nStripPanel3(bThickSurfaces); ir++)  // the triangles of the first strip, top and bottom
     {
         int nr = sr.m_FirstStripPanelIndex + ir;
 
@@ -979,7 +978,7 @@ bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, 
 
 //        if(pr.isFlapPanel() && !bConnectFlaps) continue;
 
-        for(int il=0; il<sl.NXPanels()*2*coef; il++)  // top and bottom * 2 triangles
+        for(int il=0; il<sl.nStripPanel3(bThickSurfaces); il++)  // the triangles of the last strip, top and bottom
         {
             int nl = sl.m_LastStripPanelIndex + il;
             Panel3 &pl = panels[nl];
@@ -1003,6 +1002,8 @@ bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, 
                     {
                         if(rightnode.isFlapNode() || leftnode.isFlapNode()) continue;
                     }
+                    // a trailing cell's centre node lies inside its cell, half a strip from the junction: never the same node (uav#200)
+                    if(sr.isCellCentreNode(rightnode.index()) || sl.isCellCentreNode(leftnode.index())) continue;
 
                     if(rightnode.isSame(leftnode, 0.0001))
                     {
@@ -1503,11 +1504,8 @@ void WingXfl::panelComputeBending(const std::vector<Panel3> &panel3list, bool bT
     Vector3d Dist(0.0,0.0,0.0);
     Vector3d Moment;
 
-    int coef=0, p=0;
+    int p=0;
     double bm=0;
-
-    if(bThinSurface) coef = 1;
-    else             coef = 2;
 
     while(panel3list.at(m_FirstPanel3Index+p).isSidePanel()) p++;
 
@@ -1522,7 +1520,7 @@ void WingXfl::panelComputeBending(const std::vector<Panel3> &panel3list, bool bT
             ypos.push_back(p3.CoG().y);
             zpos.push_back(p3.CoG().z);
 
-            p += coef*surf.NXPanels() *2;
+            p += surf.nStripPanel3(!bThinSurface);
         }
     }
 
@@ -1687,6 +1685,7 @@ int WingXfl::nTriangles() const
 {
     int total = quadTotal(false);
     total *=2; // two triangles/quad
+    for(Surface const &surf : m_Surface) total += 2*2*surf.NYPanels(); // the bottom and top trailing cells of each strip, four triangles each (Surface::makeTriPanels(), uav#200)
     total -= m_nTipStrips*2*2; // the leading and trailingh quads at the tip patches are degenerate.
 
     return total;

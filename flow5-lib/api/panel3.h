@@ -224,6 +224,10 @@ class FL5LIB_EXPORT Panel3 : public Panel
         int oppositeIndex() const {return m_iOppositeIndex;}
         void setOppositeIndex(int idx) {m_iOppositeIndex=idx;}
 
+        /** The chordwise cell of its strip that holds this panel, 0 at the bottom (or mid) trailing edge, see Surface::makeTriPanels(); -1 off the strips */
+        int cellIndex() const {return m_iCell;}
+        void setCellIndex(int l) {m_iCell=l;}
+
         double mu(int iVtx) const  {return m_mu[iVtx%3];}
         void setMu(int iVtx, double doubletdensity) {m_mu[iVtx%3]=doubletdensity;}
 
@@ -256,6 +260,7 @@ class FL5LIB_EXPORT Panel3 : public Panel
 
         bool m_bFromSTL;            /**< true of the panel is part of an STL mesh */
         int m_iOppositeIndex;       /**< In the case of a trailing edge panel, is the index of the panel on the opposite surface, -1 otherwise */
+        int m_iCell;                /**< the chordwise cell of its strip that holds the panel, -1 if none */
 
         Vector3d m_CoG_g;              /**< the center of gravity's position in global coordinates */
         Vector3d m_O;                  /**< the origin of the local reference frame, in global coordinates */
@@ -435,7 +440,8 @@ inline Vector3d Panel3::midTrailingPoint() const
  * The midpoint of the leading edge of the strip this panel ends: to be called on the last panel of a strip walked upstream
  * from its trailing panel via the iPU links, see Surface::makeTriPanels().
  * That triangle is the upper triangle of the leading cell, with nodes (LA, TA, LB) or (TB, LB, LA) for a mid-surface
- * left or right panel, and (LA, LB, TA) or (LA, LB, TB) for the bottom of a thick surface.
+ * left or right panel, and (LA, LB, TA) or (LA, LB, TB) for the bottom of a thick surface; when the leading cell is also the trailing one
+ * (one chordwise panel), split about its centre node C, (LA, C, LB), (C, LB, LA) and (LA, LB, C) (uav#200).
  */
 inline Vector3d Panel3::leadingEdgeMidpoint() const
 {

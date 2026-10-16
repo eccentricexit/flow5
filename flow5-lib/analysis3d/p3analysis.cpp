@@ -1267,23 +1267,35 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
 
 /**
  * The panels of the thick strip whose bottom trailing panel is i3, in the order of the iPU links (bottom surface from the trailing edge, leading edge, top surface
- * to the trailing edge), and its number of chordwise cells a side NX: cell c (panels 2c and 2c+1) of the bottom faces cell 2 NX - 1 - c of the top. False if the
- * chain is not 2 NX cells of two triangles, the first NX on the bottom.
+ * to the trailing edge), and its chordwise cells: cell c is chain[cellStart[c]] to chain[cellStart[c+1]-1], read from the panels' cell indexes
+ * (Panel3::cellIndex(), Surface::makeTriPanels(): two triangles a cell, four in the trailing cells, uav#200). There are 2 NX cells, NX = cellStart.size()/2
+ * rounded down, and cell c of the bottom faces cell 2 NX - 1 - c of the top. False if the chain is not cells 0 to 2 NX - 1 in order, the first NX on the bottom.
  */
-bool P3Analysis::thickStripChain(int i3, std::vector<int> &chain, int &NX) const
+bool P3Analysis::thickStripChain(int i3, std::vector<int> &chain, std::vector<int> &cellStart) const
 {
     chain.clear();
-    NX = 0;
+    cellStart.clear();
     if(i3<0 || i3>=nPanels() || !m_Panel3.at(i3).isBotPanel()) return false;
     for(int k=i3; k>=0; k=m_Panel3.at(k).m_iPU)
     {
         chain.push_back(k);
         if(int(chain.size())>nPanels()) return false;
     }
-    if(chain.size()%4!=0 || chain.size()<4) return false;
-    NX = int(chain.size())/4;
     for(int j=0; j<int(chain.size()); j++)
-        if(m_Panel3.at(chain[j]).isBotPanel() != (j<2*NX)) return false;
+    {
+        int cell = m_Panel3.at(chain[j]).cellIndex();
+        if(j==0 || cell!=m_Panel3.at(chain[j-1]).cellIndex())
+        {
+            if(cell!=int(cellStart.size())) return false; // the cells in order, from 0
+            cellStart.push_back(j);
+        }
+    }
+    int nCells = int(cellStart.size());
+    if(nCells<2 || nCells%2!=0) return false;
+    cellStart.push_back(int(chain.size()));
+    int NX = nCells/2;
+    for(int j=0; j<int(chain.size()); j++)
+        if(m_Panel3.at(chain[j]).isBotPanel() != (j<cellStart[NX])) return false;
     return true;
 }
 
@@ -1298,20 +1310,24 @@ bool P3Analysis::thickStripChain(int i3, std::vector<int> &chain, int &NX) const
 bool P3Analysis::thickStripLiftPressureForce(int i3, std::vector<Vector3d> const &panelForce, Vector3d &FP) const
 {
     FP.set(0.0, 0.0, 0.0);
-    std::vector<int> chain;
-    int NX = 0;
-    if(!thickStripChain(i3, chain, NX)) return false;
+    std::vector<int> chain, cellStart;
+    if(!thickStripChain(i3, chain, cellStart)) return false;
+    int NX = int(cellStart.size())/2;
     for(int c=0; c<NX; c++)
     {
-        int cb[2] = {chain[2*c], chain[2*c+1]};
-        int ct[2] = {chain[2*(2*NX-1-c)], chain[2*(2*NX-1-c)+1]};
+        int ctop = 2*NX-1-c;
         Vector3d n, f;
-        for(int k=0; k<2; k++)
+        for(int j=cellStart[c]; j<cellStart[c+1]; j++)
         {
-            Panel3 const &pb = m_Panel3.at(cb[k]);
-            Panel3 const &pt = m_Panel3.at(ct[k]);
-            n += pt.normal()*pt.area() - pb.normal()*pb.area();
-            f += panelForce.at(cb[k]) + panelForce.at(ct[k]);
+            Panel3 const &pb = m_Panel3.at(chain[j]);
+            n -= pb.normal()*pb.area();
+            f += panelForce.at(chain[j]);
+        }
+        for(int j=cellStart[ctop]; j<cellStart[ctop+1]; j++)
+        {
+            Panel3 const &pt = m_Panel3.at(chain[j]);
+            n += pt.normal()*pt.area();
+            f += panelForce.at(chain[j]);
         }
         if(n.norm()<1.0e-12) return false;
         n.normalize();
@@ -1339,7 +1355,7 @@ bool P3Analysis::stripChordNormal(Panel3 const &pTrailing, Vector3d const &QP, V
 /**
  * The moment about QP (N.m/rho) of a thick strip's load normal to its chord plane, cell by cell (m_MomentLift, uav#198): per chordwise cell, the panel forces
  * of the bottom cell and of the top cell facing it, panelForce (N/rho per panel), projected on the normal of the strip's chord plane and placed at the
- * area-weighted centre of the four panels (stripChordNormal()); the in-plane pressures, the leading-edge suction and the thickness', stay at QP
+ * area-weighted centre of the two cells' panels (stripChordNormal()); the in-plane pressures, the leading-edge suction and the thickness', stay at QP
  * (P3Analysis::forces(), rule 2).
  * Not the cells' own mean-surface normal: at the nose both faces look forward and the mesh's leading-edge node need not lie on the mean surface, so that
  * normal tilts towards the suction (by 0.05 on the leading-edge cells of a 45 deg NACA 0012 wing, whose leading-edge node is 0.4 mm above the chord) and
@@ -1348,14 +1364,16 @@ bool P3Analysis::stripChordNormal(Panel3 const &pTrailing, Vector3d const &QP, V
 bool P3Analysis::thickStripLiftMoment(int i3, std::vector<Vector3d> const &panelForce, Vector3d const &QP, Vector3d &M) const
 {
     M.set(0.0, 0.0, 0.0);
-    std::vector<int> chain;
-    int NX = 0;
-    if(!thickStripChain(i3, chain, NX)) return false;
+    std::vector<int> chain, cellStart;
+    if(!thickStripChain(i3, chain, cellStart)) return false;
+    int NX = int(cellStart.size())/2;
     Vector3d n;
     if(!stripChordNormal(m_Panel3.at(i3), QP, n)) return false;
     for(int c=0; c<NX; c++)
     {
-        int cell[4] = {chain[2*c], chain[2*c+1], chain[2*(2*NX-1-c)], chain[2*(2*NX-1-c)+1]};
+        std::vector<int> cell;   // the bottom cell and the top cell facing it
+        for(int j=cellStart[c]; j<cellStart[c+1]; j++)               cell.push_back(chain[j]);
+        for(int j=cellStart[2*NX-1-c]; j<cellStart[2*NX-c]; j++)     cell.push_back(chain[j]);
         Vector3d f, cc;
         double area = 0.0;
         for(int j : cell)
@@ -1382,7 +1400,8 @@ bool P3Analysis::thickStripLiftMoment(int i3, std::vector<Vector3d> const &panel
  * Low-Speed Aerodynamics, 2nd ed., 2001, sec. 4.4 and 12.1). At the trailing edge it is the strip's circulation, at the leading edge 0.
  *
  * Each strip is walked from its bottom trailing panel along the iPU links (bottom surface, leading edge, top surface); its chordwise stations are the pairs of nodes
- * that two consecutive cells share, the station s of the bottom facing the station 2 NX - s of the top. The mean surface is the bottom's triangles with each node
+ * that two consecutive cells share, the station s of the bottom facing the station 2 NX - s of the top, and the centre node of a trailing cell split about one
+ * (uav#200) facing the centre of the top cell over it. The mean surface is the bottom's triangles with each node
  * moved to the midpoint of itself and its facing node, its nodal density mu_top - mu_bottom (each node's value the mean of the strip's panels that hold it);
  * its load is that of sheetVorticityLoad() on a thin sheet: per triangle a ring of circulation 4 pi mu along its edges, closed by the area vorticity, the trailing
  * edge left out. The sense of each strip's rings is set by its circulation (forces(): the force rho Gamma V x l of the bottom trailing panel's vortex), so that the
@@ -1404,18 +1423,46 @@ void P3Analysis::meanSheetVorticityLoad(double const *Mu3, std::vector<Vector3d>
     auto addStrip = [&](int i3) -> bool
     {
         Panel3 const &p3 = m_Panel3.at(i3);
-        std::vector<int> chain;
-        int NX = 0;
-        if(!thickStripChain(i3, chain, NX)) return false;
+        std::vector<int> chain, cellStart;
+        if(!thickStripChain(i3, chain, cellStart)) return false;
+        int NX = int(cellStart.size())/2;
         int nCells = 2*NX;
 
-        // the stations: st[s] = {node on the side of the bottom trailing panel's left trailing node, the other}
+        // the stations: st[s] = {node on the side of the bottom trailing panel's left trailing node, the other};
+        // and the centre node of each cell split in four about it (uav#200), -1 for the cells of two triangles
         std::vector<std::array<int,2>> st(nCells+1);
+        std::vector<int> centre(nCells, -1);
         st[0] = {p3.leftTrailingNode().index(), p3.rightTrailingNode().index()};
+        auto has = [](Panel3 const &t, int n){return n>=0 && (t.nodeIndex(0)==n || t.nodeIndex(1)==n || t.nodeIndex(2)==n);};
         for(int c=0; c<nCells; c++)
         {
-            Panel3 const &t1 = m_Panel3.at(chain[2*c]);
-            Panel3 const &t2 = m_Panel3.at(chain[2*c+1]);
+            int nt = cellStart[c+1]-cellStart[c];
+            if(nt==4)
+            {
+                // downstream (its station c and its centre), side, side, upstream (its centre and its station c+1)
+                Panel3 const &tD = m_Panel3.at(chain[cellStart[c]]);
+                Panel3 const &tU = m_Panel3.at(chain[cellStart[c]+3]);
+                if(!has(tD, st[c][0]) || !has(tD, st[c][1])) return false;
+                for(int k=0; k<3; k++) if(tD.nodeIndex(k)!=st[c][0] && tD.nodeIndex(k)!=st[c][1]) centre[c] = tD.nodeIndex(k);
+                if(centre[c]<0 || !has(tU, centre[c]) || has(tU, st[c][0]) || has(tU, st[c][1])) return false;
+                // the side triangle that holds st[c][0] holds the next station's node on the same side
+                int next0=-1;
+                for(int j=1; j<3; j++)
+                {
+                    Panel3 const &tS = m_Panel3.at(chain[cellStart[c]+j]);
+                    if(!has(tS, st[c][0]) || !has(tS, centre[c])) continue;
+                    for(int k=0; k<3; k++) if(tS.nodeIndex(k)!=st[c][0] && tS.nodeIndex(k)!=centre[c]) next0 = tS.nodeIndex(k);
+                }
+                if(next0<0 || !has(tU, next0)) return false;
+                int next1=-1;
+                for(int k=0; k<3; k++) if(tU.nodeIndex(k)!=centre[c] && tU.nodeIndex(k)!=next0) next1 = tU.nodeIndex(k);
+                if(next1<0) return false;
+                st[c+1] = {next0, next1};
+                continue;
+            }
+            if(nt!=2) return false;
+            Panel3 const &t1 = m_Panel3.at(chain[cellStart[c]]);
+            Panel3 const &t2 = m_Panel3.at(chain[cellStart[c]+1]);
             auto nOld = [&](Panel3 const &t){int n=0; for(int k=0; k<3; k++) if(t.nodeIndex(k)==st[c][0] || t.nodeIndex(k)==st[c][1]) n++; return n;};
             Panel3 const *pOne=nullptr, *pTwo=nullptr;
             if     (nOld(t1)==1 && nOld(t2)==2) {pOne=&t1; pTwo=&t2;}
@@ -1464,17 +1511,37 @@ void P3Analysis::meanSheetVorticityLoad(double const *Mu3, std::vector<Vector3d>
                 mmu[s][side] = nb==nt ? 0.0 : nodeMu(nt) - nodeMu(nb);
             }
 
+        // the centres of the bottom cells split about one, each facing the centre of the top cell over it
+        std::vector<Vector3d> cx(NX);
+        std::vector<double> cmu(NX, 0.0);
+        for(int c=0; c<NX; c++)
+        {
+            int nb = centre[c], nt = centre[2*NX-1-c];
+            if((nb<0) != (nt<0)) return false;
+            if(nb<0) continue;
+            cx[c]  = (nodePos(nb) + nodePos(nt)) * 0.5;
+            cmu[c] = nodeMu(nt) - nodeMu(nb);
+        }
+
         // the bottom's triangles on the mean surface, oriented as the bottom's normal reversed (towards the top)
         double sense = 0.0;
         size_t first = tris.size();
-        for(int j=0; j<2*NX; j++)
+        for(int j=0; j<cellStart[NX]; j++)
         {
             Panel3 const &pb = m_Panel3.at(chain[j]);
-            int c = j/2;
+            int c = 0;
+            while(cellStart[c+1]<=j) c++;
             MeanTri t;
             for(int k=0; k<3; k++)
             {
                 int n = pb.nodeIndex(k);
+                if(n==centre[c])
+                {
+                    t.x[k]  = cx[c];
+                    t.mu[k] = cmu[c];
+                    t.te[k] = false;
+                    continue;
+                }
                 int s=-1, side=-1;
                 for(int ss=c; ss<=c+1; ss++)
                     for(int sd=0; sd<2; sd++)

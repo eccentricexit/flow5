@@ -45,7 +45,7 @@ bool Panel3::s_bUseNintcheuFata = true;
 
 
 
-Panel3::Panel3() : Panel(), m_bNullTriangle{true}, m_bIsLeftPanel{false}, m_bFromSTL{false}, m_iOppositeIndex{-1},
+Panel3::Panel3() : Panel(), m_bNullTriangle{true}, m_bIsLeftPanel{false}, m_bFromSTL{false}, m_iOppositeIndex{-1}, m_iCell{-1},
    m_SignedArea{0}, m_Angle{0,0,0}, bx{0,0,0}, by{0,0,0}, m_mu{0,0,0}, m_beta{0,0,0}
 {
     m_S[0].setIndex(-1);
@@ -266,6 +266,7 @@ void Panel3::initialize()
     m_bIsLeftPanel = false;
     m_bFromSTL = false;
     m_iOppositeIndex = -1;
+    m_iCell = -1;
 }
 
 
