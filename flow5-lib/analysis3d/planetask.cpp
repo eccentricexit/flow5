@@ -1323,6 +1323,16 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
     }
 
 
+    // VLM2: each wing's moment is that of the near-field load of the lattice (P4Analysis::forces(), rule 4, uav#187), the model of its
+    // derivatives; the onset is the one the circulations were solved with (the control polar's turned mesh: the body x axis)
+    std::vector<Vector3d> nearFieldMoment;
+    if(pPlaneXfl && m_pPlPolar->isVLM2() && m_pP4A)
+    {
+        std::vector<Vector3d> VInf(m_pP4A->nPanels(), objects::windDirection(bInGeomAxes ? 0.0 : alpha, beta)*QInf);
+        Vector3d F, M;
+        m_pP4A->boundVortexLoad(mu4, sigma4, VInf, CoG, F, M, &nearFieldMoment);
+    }
+
     if(pPlaneXfl)
     {
         const int nWings = m_pPlane->nWings();
@@ -1337,6 +1347,12 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
             {
                 pWing->panel4ComputeInviscidForces(m_pP4A->m_Panel4, m_pPlPolar, CoG, alpha, beta, QInf, cp4, mu4, m_PartAF[iw]);
                 pWing->panel4ComputeStrips(m_pP4A->m_Panel4, m_pPlPolar, CoG, alpha, beta, QInf, cp4, mu4, m_SpanDistFF[iw]);
+                if(!nearFieldMoment.empty())
+                {
+                    Vector3d Mi;
+                    for(int i4=pWing->firstPanel4Index(); i4<pWing->firstPanel4Index()+pWing->nPanel4(); i4++) Mi += nearFieldMoment.at(i4);
+                    m_PartAF[iw].setMi(Mi * (1.0/(0.5*m_pPlPolar->density()*QInf*QInf)));     // N.m/q
+                }
             }
             else if(m_pPlPolar->isTriangleMethod())
             {
