@@ -1028,10 +1028,11 @@ void PlaneTask::addTwistedVelField(double QInf, double alpha, std::vector<Vector
     int iStrip = 0;
     int iPanel = 0;
 
-    int coef = m_pPlPolar->bThinSurfaces() ? 1 : 2; // top and bottom surfaces
-    if(m_pPlPolar->isTriangleMethod()) coef *= 2; // 2 triangles/quad
+    int coef0 = m_pPlPolar->bThinSurfaces() ? 1 : 2; // top and bottom surfaces
     for(int iw=0; iw<pPlaneXfl->nWings(); iw++)
     {
+        int coef = coef0;
+        if(m_pPlPolar->isTriangleMethod()) coef *= pPlaneXfl->wingAt(iw)->nCellTriangles(); // the triangles of a quad cell
         WingXfl const *pWing = pPlaneXfl->wingAt(iw);
         int nWingPanels = m_pPlPolar->isQuadMethod() ? pWing->nPanel4() : pWing->nPanel3();
         int iWingPanel0=iPanel;

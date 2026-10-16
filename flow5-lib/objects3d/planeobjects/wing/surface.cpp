@@ -83,7 +83,9 @@ Surface::Surface()
     m_OuterSection = 0;
 
     m_FirstStripPanelIndex = m_LastStripPanelIndex = -1;
-
+    m_FirstCentreNode = -1;
+    m_nCentreNodes = 0;
+    m_nCellTriangles = 2;
 }
 
 
@@ -171,6 +173,9 @@ void Surface::copy(Surface const &aSurface)
 
     m_FirstStripPanelIndex = aSurface.m_FirstStripPanelIndex;
     m_LastStripPanelIndex  = aSurface.m_LastStripPanelIndex;
+    m_FirstCentreNode = aSurface.m_FirstCentreNode;
+    m_nCentreNodes    = aSurface.m_nCentreNodes;
+    m_nCellTriangles  = aSurface.m_nCellTriangles;
 }
 
 
@@ -1026,11 +1031,21 @@ void Surface::setTwist(bool bQuarterChord)
 }
 
 
-void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &nodes, int ip3start, bool bThickSurfaces, int nTipStrips, int &leftnodeidx, int &rightnodeidx)
+/**
+ * Makes the surface's triangles and nodes, appended to panel3list and nodes.
+ * @param bCentredCells false: each quad cell of the strips is split along one diagonal into two triangles (flow5's mesh);
+ * true: each cell is split into four triangles about a centre node (uav#200), so that the strip's trailing triangle is centred on its strip.
+ * The layout is kept in nCellTriangles() and in each strip panel (Panel3::nCellTriangles()), where the strip walks read it.
+ */
+void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &nodes, int ip3start, bool bThickSurfaces, int nTipStrips, int &leftnodeidx, int &rightnodeidx,
+                            bool bCentredCells)
 {
     int iLA=0, iLB=0, iTA=0, iTB=0;
     m_Panel3List.clear();
     clearTriFlapMesh();
+    m_nCellTriangles = bCentredCells ? 4 : 2;
+    m_FirstCentreNode = int(nodes.size());
+    m_nCentreNodes = 0;
 
     int nx = m_NXPanels+1;  // number of nodes in the chordwise direction for a thin surface
     int nx2 = 2*m_NXPanels+1;  // number of nodes in the chordwise direction for a thick surface
@@ -1066,6 +1081,53 @@ void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &
     int nRightTipRearNode = int(nodes.size()-1);
 
     if(bMakeRightPatch) makeTipNodes(nodes, false, nTipStrips);
+
+    // the cells of the strips: cell l of strip k, l from the bottom (or mid) trailing edge, round the leading edge to the top trailing edge
+    int nCells = bThickSurfaces ? 2*m_NXPanels : m_NXPanels;
+    int nGrid0 = n0 + (bMakeLeftPatch ? nsn : 0); // the first node of the strips' grid, after the left tip patch's nodes
+    auto cellSide = [this, bThickSurfaces](int l)
+    {
+        if(!bThickSurfaces) return xfl::MIDSURFACE;
+        return l<m_NXPanels ? xfl::BOTSURFACE : xfl::TOPSURFACE;
+    };
+    // the corner nodes of a cell; in the case of thick surfaces, make sure that top, bot and side panels are connected at the rear tips
+    auto cellCorners = [&](int k, int l, int &TA, int &LA, int &TB, int &LB)
+    {
+        int nrow = bThickSurfaces ? nx2 : nx;
+        TA = nGrid0 +  k   *nrow + l;
+        LA = nGrid0 +  k   *nrow + l+1;
+        TB = nGrid0 + (k+1)*nrow + l;
+        LB = nGrid0 + (k+1)*nrow + l+1;
+        if(!bThickSurfaces) return;
+        if(m_bClosedLeftSide && k==0)
+        {
+            if(l==0)                   TA = nLeftTipRearNode;
+            else if(l==2*m_NXPanels-1) LA = nLeftTipRearNode;
+        }
+        if(m_bClosedRightSide && k==m_NYPanels-1)
+        {
+            if(l==0)                   TB = nRightTipRearNode;
+            else if(l==2*m_NXPanels-1) LB = nRightTipRearNode;
+        }
+    };
+    auto isFlapCell = [this](int l) {return l<m_NXFlap || l>2*m_NXPanels-m_NXFlap-1;};
+
+    // with centred cells, each cell's centre node, the mean of its four corners, made after all the other nodes so as not to move their indexes (uav#200)
+    m_FirstCentreNode = int(nodes.size());
+    m_nCentreNodes = bCentredCells ? m_NYPanels*nCells : 0;
+    for(int k=0; k<m_NYPanels && bCentredCells; k++)
+    {
+        for(int l=0; l<nCells; l++)
+        {
+            cellCorners(k, l, iTA, iLA, iTB, iLB);
+            Node node;
+            node.set((nodes.at(iTA) + nodes.at(iLA) + nodes.at(iTB) + nodes.at(iLB)) * 0.25);
+            node.setSurfacePosition(cellSide(l));
+            node.setIndex(int(nodes.size()));
+            node.setFlapNode(isFlapCell(l));
+            nodes.push_back(node);
+        }
+    }
 
     // the two tip nodes do not belong to any surface;
     // this is used in the analysis to set Cp=0 at these singular locations
@@ -1187,25 +1249,29 @@ void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &
     }
 
     m_FirstStripPanelIndex = int(panel3list.size());
-    xfl::enumSurfacePosition side(xfl::NOSURFACE);
     for (int k=0; k<m_NYPanels; k++)
     {
         //from T.E. to L.E.
-        for (int l=0; l<2*m_NXPanels; l++)
+        for (int l=0; l<nCells; l++)
         {
-            Panel3 p3Dtmp, p3Utmp;
-            if(!bThickSurfaces)
+            xfl::enumSurfacePosition side = cellSide(l);
+            cellCorners(k, l, iTA, iLA, iTB, iLB);
+
+            // note the strip starting nodes for later use
+            if(bThickSurfaces && l==0)
             {
-                side = xfl::MIDSURFACE;
-                if(l>=m_NXPanels) break;
-            }
-            else
-            {
-                if(l<m_NXPanels) side = xfl::BOTSURFACE;
-                else             side = xfl::TOPSURFACE;
+                if(k==0)             leftnodeidx  = iTA;
+                if(k==m_NYPanels-1)  rightnodeidx = iTB;
             }
 
-            // Bottom surface:
+            // Each cell is split into T = m_nCellTriangles triangles p3[0..T-1], in the order of the strip's chain:
+            //   p3[0] the downstream triangle, on the edge TA-TB: on the bottom and mid surfaces the trailing triangle of the strip,
+            //         whose trailing edge nodes are its vertices 1 and 2 (Panel3::leftTrailingNode(), rightTrailingNode());
+            //   p3[T-1] the upstream triangle, on the edge LA-LB: the leading triangle of the mid and bottom surfaces' last cell,
+            //         its leading edge nodes where Panel3::leadingEdgeMidpoint() reads them, the trailing triangle of the top surface.
+            //
+            // T = 2, the default: the cell is split along one diagonal, D = p3[0] and U = p3[1].
+            //   Bottom surface:
             //     Left wing             Right wing
             //   0           2         0           2
             //   _____________         _____________
@@ -1218,200 +1284,186 @@ void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &
             // 1 _____________         _____________
             //   1           2         1           2
             //
-
-            if(side==xfl::MIDSURFACE)
+            // T = 4, centred cells (uav#200): the cell is split about its centre node C, p3[1] the triangle on side A, p3[2] on side B.
+            // The downstream and upstream triangles are D and U with the vertex off their outer edge replaced by C: same vertex roles,
+            // same orientation. With a single diagonal the trailing triangle's centroid sits a third of the strip from one side: a constant
+            // doublet (TRIUNIFORM) samples the onset off the strip's centre with the same sign in every strip; here it is on the strip's centre line.
+            //
+            //   Mid surface, both sides         Bottom and top surfaces
+            //   LA          LB                  LA          LB
+            //   _____________                   _____________
+            //   |\    3    /|                   |\    3    /|
+            //   |  \     /  |                   |  \     /  |
+            //   | 1  \ /  2 |                   | 1  \ /  2 |
+            //   |    / C\   |                   |    / C\   |
+            //   |  /     \  |                   |  /     \  |
+            //   |/    0    \|                   |/    0    \|
+            //   _____________                   _____________
+            //   TA          TB                  TA          TB
+            //
+            int const T = m_nCellTriangles;
+            Panel3 p3[4];
+            Panel3 &pD = p3[0];
+            Panel3 &pU = p3[T-1];
+            if(T==2)
             {
-                iTA = n0 +  k   *nx + l;
-                iLA = n0 +  k   *nx + l+1;
-                iTB = n0 + (k+1)*nx + l;
-                iLB = n0 + (k+1)*nx + l+1;
+                if(m_bIsLeftSurf)
+                {
+                    if(side==xfl::MIDSURFACE)
+                    {
+                        pD.setFrame(nodes, iLB, iTA, iTB);
+                        pU.setFrame(nodes, iLA, iTA, iLB);
+                        pU.setLeftPanel(true);
+                    }
+                    else if(side==xfl::BOTSURFACE)
+                    {
+                        pD.setFrame(nodes, iLB, iTB, iTA);
+                        pU.setFrame(nodes, iLA, iLB, iTA);
+                        pU.setLeftPanel(true);
+                    }
+                    else
+                    {
+                        pD.setFrame(nodes, iTB, iTA, iLA);
+                        pU.setFrame(nodes, iTB, iLA, iLB);
+                        pD.setLeftPanel(true);
+                    }
+                }
+                else
+                {
+                    if(side==xfl::MIDSURFACE)
+                    {
+                        pD.setFrame(nodes, iLA, iTA, iTB);
+                        pU.setFrame(nodes, iTB, iLB, iLA);// so that (l,m) is same as opposite panel on right surface
+                        pD.setLeftPanel(true);
+                    }
+                    else if(side==xfl::BOTSURFACE)
+                    {
+                        pD.setFrame(nodes, iLA, iTB, iTA);
+                        pU.setFrame(nodes, iLA, iLB, iTB);
+                        pD.setLeftPanel(true);
+                    }
+                    else
+                    {
+                        pD.setFrame(nodes, iTB, iTA, iLB);
+                        pU.setFrame(nodes, iTA, iLA, iLB);
+                        pU.setLeftPanel(true);
+                    }
+                }
             }
             else
             {
-                iTA = n0 +  k   *nx2 + l;
-                iLA = n0 +  k   *nx2 + l+1;
-                iTB = n0 + (k+1)*nx2 + l;
-                iLB = n0 + (k+1)*nx2 + l+1;
-
-                // in the case of thick surfaces, make sure that top, bot and side panels are connected
-                // at the rear tips
-                if(m_bClosedLeftSide)
+                int iC = m_FirstCentreNode + k*nCells + l;
+                if(m_bIsLeftSurf)
                 {
-                    if(k==0)
+                    if(side==xfl::MIDSURFACE)
                     {
-                        if(l==0)                   iTA = nLeftTipRearNode;
-                        else if(l==2*m_NXPanels-1) iLA = nLeftTipRearNode;
+                        pD.setFrame(nodes, iC, iTA, iTB);
+                        pU.setFrame(nodes, iLA, iC, iLB);
+                        pU.setLeftPanel(true);
+                    }
+                    else if(side==xfl::BOTSURFACE)
+                    {
+                        pD.setFrame(nodes, iC, iTB, iTA);
+                        pU.setFrame(nodes, iLA, iLB, iC);
+                        pU.setLeftPanel(true);
+                    }
+                    else
+                    {
+                        pD.setFrame(nodes, iTB, iTA, iC);
+                        pU.setFrame(nodes, iC, iLA, iLB);
+                        pD.setLeftPanel(true);
                     }
                 }
-                if(m_bClosedRightSide)
+                else
                 {
-                    if(k==m_NYPanels-1)
+                    if(side==xfl::MIDSURFACE)
                     {
-                        if(l==0)
-                            iTB = nRightTipRearNode;
-                        else if(l==2*m_NXPanels-1)
-                            iLB = nRightTipRearNode;
+                        pD.setFrame(nodes, iC, iTA, iTB);
+                        pU.setFrame(nodes, iC, iLB, iLA);// so that (l,m) is same as opposite panel on right surface
+                        pD.setLeftPanel(true);
+                    }
+                    else if(side==xfl::BOTSURFACE)
+                    {
+                        pD.setFrame(nodes, iC, iTB, iTA);
+                        pU.setFrame(nodes, iLA, iLB, iC);
+                        pD.setLeftPanel(true);
+                    }
+                    else
+                    {
+                        pD.setFrame(nodes, iTB, iTA, iC);
+                        pU.setFrame(nodes, iC, iLA, iLB);
+                        pU.setLeftPanel(true);
                     }
                 }
-
-                // note the strip starting nodes for later use
-                if(l==0)
-                {
-                    if(k==0)
-                        leftnodeidx = iTA;
-                    if(k==m_NYPanels-1)
-                        rightnodeidx = iTB;
-                }
-            }
-
-            if(m_bIsLeftSurf)
-            {
+                // the side triangles, oriented as the downstream and upstream ones: the mid surface's cells turn the other way round from the bottom's and top's
                 if(side==xfl::MIDSURFACE)
                 {
-                    p3Dtmp.setFrame(nodes, iLB, iTA, iTB);
-                    p3Utmp.setFrame(nodes, iLA, iTA, iLB);
-                    p3Utmp.setLeftPanel(true);
-                }
-                else if(side==xfl::BOTSURFACE)
-                {
-                    p3Dtmp.setFrame(nodes, iLB, iTB, iTA);
-                    p3Utmp.setFrame(nodes, iLA, iLB, iTA);
-                    p3Utmp.setLeftPanel(true);
+                    p3[1].setFrame(nodes, iTA, iC, iLA);
+                    p3[2].setFrame(nodes, iTB, iLB, iC);
                 }
                 else
                 {
-                    p3Dtmp.setFrame(nodes, iTB, iTA, iLA);
-                    p3Utmp.setFrame(nodes, iTB, iLA, iLB);
-                    p3Dtmp.setLeftPanel(true);
+                    p3[1].setFrame(nodes, iTA, iLA, iC);
+                    p3[2].setFrame(nodes, iTB, iC, iLB);
                 }
-
-                if(l==0)
-                {
-                    p3Dtmp.m_bIsTrailing = true;
-                    if (side==xfl::BOTSURFACE || side==xfl::MIDSURFACE)
-                    {
-                        p3Dtmp.m_TELeftBisector  = TEbisector(p3Dtmp.vertexAt(1));
-                        p3Dtmp.m_TERightBisector = TEbisector(p3Dtmp.vertexAt(2));
-                    }
-                }
-                if(l==m_NXPanels-1)   p3Utmp.m_bIsLeading  = true;
-                if(l==m_NXPanels)     p3Dtmp.m_bIsLeading  = true;
-                if(l==2*m_NXPanels-1) p3Utmp.m_bIsTrailing = true;
-            }
-            else
-            {
-                if(side==xfl::MIDSURFACE)
-                {
-                    p3Dtmp.setFrame(nodes, iLA, iTA, iTB);
-                    p3Utmp.setFrame(nodes, iTB, iLB, iLA);// so that (l,m) is same as opposite panel on right surface
-                    p3Dtmp.setLeftPanel(true);
-                }
-                else if(side==xfl::BOTSURFACE)
-                {
-                    p3Dtmp.setFrame(nodes, iLA, iTB, iTA);
-                    p3Utmp.setFrame(nodes, iLA, iLB, iTB);
-                    p3Dtmp.setLeftPanel(true);
-                }
-                else
-                {
-                    p3Dtmp.setFrame(nodes, iTB, iTA, iLB);
-                    p3Utmp.setFrame(nodes, iTA, iLA, iLB);
-                    p3Utmp.setLeftPanel(true);
-                }
-                if(l==0)
-                {
-                    p3Dtmp.m_bIsTrailing = true;
-                    if (side==xfl::BOTSURFACE || side==xfl::MIDSURFACE)
-                    {
-                        p3Dtmp.m_TELeftBisector  = TEbisector(p3Dtmp.vertexAt(1));
-                        p3Dtmp.m_TERightBisector = TEbisector(p3Dtmp.vertexAt(2));
-                    }
-                }
-                if(l==NXPanels()-1)   p3Utmp.m_bIsLeading  = true;
-                if(l==NXPanels())     p3Dtmp.m_bIsLeading  = true;
-                if(l==2*NXPanels()-1) p3Utmp.m_bIsTrailing = true;
             }
 
-            if(!p3Dtmp.isNullTriangle())
+            if(l==0)
             {
-                panel3list.push_back(p3Dtmp);
-                Panel3 &p3D = panel3list.back();
-                p3D.setSurfacePosition(side);
-                p3D.setSurfaceIndex(m_Index);
-                p3D.setIndex(ip3start++);
-                p3D.m_bIsInSymPlane  = m_bIsInSymPlane;
-                p3D.m_bIsLeftWingPanel  = m_bIsLeftSurf;
-                if(p3D.isTrailing())
+                pD.m_bIsTrailing = true;
+                if (side==xfl::BOTSURFACE || side==xfl::MIDSURFACE)
                 {
+                    pD.m_TELeftBisector  = TEbisector(pD.vertexAt(1));
+                    pD.m_TERightBisector = TEbisector(pD.vertexAt(2));
+                }
+            }
+            if(l==m_NXPanels-1)   pU.m_bIsLeading  = true;
+            if(l==m_NXPanels)     pD.m_bIsLeading  = true;
+            if(l==2*m_NXPanels-1) pU.m_bIsTrailing = true;
+
+            for(int t=0; t<T; t++)
+            {
+                if(p3[t].isNullTriangle())
+                {
+                    nNullTriangles++;
+                    continue;
+                }
+                panel3list.push_back(p3[t]);
+                Panel3 &p3T = panel3list.back();
+                p3T.setSurfacePosition(side);
+                p3T.setSurfaceIndex(m_Index);
+                p3T.setIndex(ip3start++);
+                p3T.m_bIsInSymPlane  = m_bIsInSymPlane;
+                p3T.m_bIsLeftWingPanel  = m_bIsLeftSurf;
+                p3T.setCellTriangles(T);
+                if(p3T.isTrailing())
+                {
+                    // the bottom trailing panel and the top trailing panel of the strip face each other
                     if     (side==xfl::BOTSURFACE)
-                        p3D.setOppositeIndex(p3D.index()+4*m_NXPanels-1);
+                        p3T.setOppositeIndex(p3T.index()+T*nCells-1);
                     else if(side==xfl::TOPSURFACE)
-                        p3D.setOppositeIndex(p3D.index()-4*m_NXPanels+1); // should not ne reached
+                        p3T.setOppositeIndex(p3T.index()-T*nCells+1);
                 }
 
-                // note: UP and DOWN are defined on the developed surface
-                // i.e. UP direction is towards the TE on the top surface
-                p3D.m_iPD = int(panel3list.size())-2;
-                p3D.m_iPU = int(panel3list.size());
-                if(l==0)              p3D.m_iPD = -1;// no panel downstream
-                if(m_bTEFlap &&  (l<NXFlap() || l>2*m_NXPanels-NXFlap()-1))
+                // the strip's chain: UP and DOWN are defined on the developed surface,
+                // from the bottom trailing edge round the leading edge to the top trailing edge
+                p3T.m_iPD = int(panel3list.size())-2;
+                p3T.m_iPU = int(panel3list.size());
+                if(t==0                  && l==0)        p3T.m_iPD = -1;// no panel downstream
+                if(t==T-1 && l==nCells-1) p3T.m_iPU = -1;// no panel upstream
+
+                if(m_bTEFlap && isFlapCell(l))
                 {
-                    p3D.setFlapPanel(true);
-                    addFlapPanel3Index(p3D.index());
+                    p3T.setFlapPanel(true);
+                    addFlapPanel3Index(p3T.index());
                 }
-                p3D.setSurfaceNormal(m_Normal);
-                addPanel3Index(p3D.index());
+                p3T.setSurfaceNormal(m_Normal);
+                addPanel3Index(p3T.index());
             }
-            else nNullTriangles++;
-
-            if(!p3Utmp.isNullTriangle())
-            {
-                panel3list.push_back(p3Utmp);
-                Panel3 &p3U = panel3list.back();
-                p3U.setSurfacePosition(side);
-                p3U.setSurfaceIndex(m_Index);
-                p3U.setIndex(ip3start++);
-                p3U.m_bIsInSymPlane  = m_bIsInSymPlane;
-                p3U.m_bIsLeftWingPanel  = m_bIsLeftSurf;
-                if(p3U.isTrailing())
-                {
-                    if     (side==xfl::BOTSURFACE)
-                        p3U.setOppositeIndex(p3U.index()+4*m_NXPanels-1);// should not ne reached
-                    else if(side==xfl::TOPSURFACE)
-                        p3U.setOppositeIndex(p3U.index()-4*m_NXPanels+1);
-                }
-
-                // note: UP and DOWN are defined on the developed surface - NO
-                // i.e. UP direction is towards the TE on the top surface - NO
-                p3U.m_iPD = int(panel3list.size())-2;
-                p3U.m_iPU = int(panel3list.size());
-
-                if(bThickSurfaces)
-                {
-                    if(l==2*m_NXPanels-1) p3U.m_iPU = -1;// no panel upstream
-                }
-                else
-                {
-                    if(l==m_NXPanels-1) p3U.m_iPU = -1;// no panel upstream
-                }
-
-                if(m_bTEFlap &&  (l<NXFlap() || l>2*m_NXPanels-NXFlap()-1))
-                {
-                    p3U.setFlapPanel(true);
-                    addFlapPanel3Index(p3U.index());
-                }
-
-                p3U.setSurfaceNormal(m_Normal);
-                addPanel3Index(p3U.index());
-            }
-            else nNullTriangles++;
         }
     }
 
-    if(bThickSurfaces)
-        m_LastStripPanelIndex = int(panel3list.size())-2*2*m_NXPanels;
-    else
-        m_LastStripPanelIndex = int(panel3list.size())-  2*m_NXPanels;
+    m_LastStripPanelIndex = int(panel3list.size())-m_nCellTriangles*nCells;
 
     n0 += (2*m_NXPanels+1)*(m_NYPanels+1);
     if(bMakeRightPatch)
@@ -1514,6 +1566,59 @@ void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &
     std::sort(m_Panel3List.begin(), m_Panel3List.end());
 
     (void)nNullTriangles;
+}
+
+
+/**
+ * With centred cells (nCellTriangles() 4, uav#200), moves each cell's centre node back to the mean of the cell's four corners, after corners have
+ * moved otherwise than with their cell: PlaneXfl::sealFlapEnds() warps the end strips of the flaps it seals. Does nothing on a mesh of two triangles a cell.
+ * The cells are read along the strips' chains of panels from their trailing panels, four triangles a cell: the centre is the one node that the cell's downstream and upstream triangles share, the corners are their other nodes.
+ * A strip whose chain is not made of whole cells (a null triangle) is left as it is.
+ * @param panel3 the panels, whose node indexes and iPU links are used
+ * @param node the nodes to move
+ */
+void Surface::recentreCellNodes(std::vector<Panel3> const &panel3, std::vector<Node> &node) const
+{
+    int const T = m_nCellTriangles;
+    if(T!=4) return;
+    int np = int(panel3.size());
+    for(int i3 : m_Panel3List)
+    {
+        if(i3<0 || i3>=np) continue;
+        Panel3 const &p3 = panel3.at(i3);
+        if(!p3.isTrailing() || !(p3.isBotPanel() || p3.isMidPanel())) continue;
+
+        std::vector<int> chain;
+        for(int k=i3; k>=0 && k<np; k=panel3.at(k).m_iPU)
+        {
+            chain.push_back(k);
+            if(int(chain.size())>np) return; // a loop, not a chain
+        }
+        if(chain.size()%T!=0) continue;
+
+        for(size_t c=0; c<chain.size(); c+=T)
+        {
+            Panel3 const &pd = panel3.at(chain.at(c));
+            Panel3 const &pu = panel3.at(chain.at(c+T-1));
+            int iC=-1, nShared=0;
+            for(int a=0; a<3; a++)
+                for(int b=0; b<3; b++)
+                    if(pd.nodeIndex(a)==pu.nodeIndex(b)) {iC = pd.nodeIndex(a); nShared++;}
+            if(nShared!=1 || iC<0 || iC>=int(node.size())) continue;
+
+            Vector3d sum;
+            int n=0;
+            for(Panel3 const *pp : {&pd, &pu})
+                for(int a=0; a<3; a++)
+                {
+                    int in = pp->nodeIndex(a);
+                    if(in==iC || in<0 || in>=int(node.size())) continue;
+                    sum += node.at(in);
+                    n++;
+                }
+            if(n==4) node[iC].set(sum*0.25);
+        }
+    }
 }
 
 

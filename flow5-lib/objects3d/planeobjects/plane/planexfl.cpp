@@ -932,7 +932,12 @@ void PlaneXfl::swapIndexes(int k, int l)
 }
 
 
-void PlaneXfl::makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh)
+/**
+ * Builds the surfaces and the meshes.
+ * @param bCentredCells the triangle mesh splits each quad cell of the wings' strips into four triangles about its centre node (uav#200),
+ * instead of two along a diagonal; see Surface::makeTriPanels()
+ */
+void PlaneXfl::makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh, bool bCentredCells)
 {
     // start with the fuse, needed to construct surfaces
 
@@ -949,7 +954,7 @@ void PlaneXfl::makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMake
 
     makeQuadMesh(bThickSurfaces, bIgnoreFusePanels);
 
-    if(bMakeTriMesh)  makeTriMesh(bThickSurfaces);
+    if(bMakeTriMesh)  makeTriMesh(bThickSurfaces, bCentredCells);
 
     m_bIsInitialized = true;
 }
@@ -1036,14 +1041,14 @@ void PlaneXfl::makeQuadMesh(bool bThickSurfaces, bool bIgnoreFusePanels)
 }
 
 
-void PlaneXfl::makeTriMesh(bool bThickSurfaces)
+void PlaneXfl::makeTriMesh(bool bThickSurfaces, bool bCentredCells)
 {
     m_RefTriMesh.clearMesh();
 
     for(int iw=0; iw<nWings(); iw++)
     {
         WingXfl *pWing = m_Wing[iw];
-        pWing->makeTriPanels(m_RefTriMesh.nPanels(), m_RefTriMesh.nNodes(), bThickSurfaces);
+        pWing->makeTriPanels(m_RefTriMesh.nPanels(), m_RefTriMesh.nNodes(), bThickSurfaces, bCentredCells);
 
         bool bConnectFlaps = false;
         for(int jSurf=0; jSurf<pWing->nSurfaces()-1; jSurf++)
@@ -1975,6 +1980,9 @@ int PlaneXfl::sealFlapEnds(std::vector<Panel3> const &panel3, std::vector<Node> 
                     }
                 }
             }
+            // the end strips are warped, not turned: their cells' centre nodes go back to the mean of their corners (uav#200)
+            sa.recentreCellNodes(panel3, node);
+            sb.recentreCellNodes(panel3, node);
         }
     }
     return nMoved;

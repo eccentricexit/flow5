@@ -153,7 +153,9 @@ class FL5LIB_EXPORT WingXfl : public Part
 
         bool intersectWing(const Vector3d &O, const Vector3d &U, Vector3d &I, int &idxSurf, double &dist, bool bDirOnly) const;
 
-        int makeTriPanels(int ip3start, int indStart, bool bThickSurfaces);
+        int makeTriPanels(int ip3start, int indStart, bool bThickSurfaces, bool bCentredCells=false);
+        /** The triangles of a quad cell of the strips in the last triangle mesh: 2, or 4 with centred cells (Surface::makeTriPanels(), uav#200) */
+        int nCellTriangles() const {return m_nCellTriangles;}
 
         void scaleSweep(double NewSweep);
         void scaleTwist(double NewTwist);
@@ -197,7 +199,7 @@ class FL5LIB_EXPORT WingXfl : public Part
         std::vector<Node> const &nodes() const {return m_TriMesh.nodes();}
 
         int nXPanels() const {return m_Section.front().m_NXPanels;} /** Returns the number of chordwise quad panels at the first span section */
-        int nXPanel3() const {return m_Section.front().m_NXPanels *2;}/** Returns the number of chordwise triangular panels at the first span section */
+        int nXPanel3() const {return m_Section.front().m_NXPanels *m_nCellTriangles;}/** Returns the number of chordwise triangular panels at the first span section */
 
         void setNXPanels(int iSection, int nx) {if(iSection>=0 && iSection<nSections()) m_Section[iSection].m_NXPanels = std::max(1,nx);}
         void setNYPanels(int iSection, int ny) {if(iSection>=0 && iSection<nSections()) m_Section[iSection].m_NYPanels = std::max(1,ny);}
@@ -338,6 +340,7 @@ class FL5LIB_EXPORT WingXfl : public Part
 
         int m_nPanel3;                         /**< the number of triangular panels on this Wing; depends on whether the polar is a thin or thicksurface type */
         int m_nPanel4;                         /**< the number of quad panels on this Wing; depends on whether the polar is a thin or thicksurface type */
+        int m_nCellTriangles;                  /**< the triangles of a strip cell in the last triangle mesh, see nCellTriangles() */
         int m_nNodes;                          /**< the number of nodes on this Wing; depends on whether the polar is a thin or thicksurface type */
 
         std::vector<Segment3d> m_Outline;   /** The outline segments  used for displays - stored to save redraw times */

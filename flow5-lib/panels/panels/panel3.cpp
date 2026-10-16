@@ -266,6 +266,7 @@ void Panel3::initialize()
     m_bIsLeftPanel = false;
     m_bFromSTL = false;
     m_iOppositeIndex = -1;
+    m_nCellTriangles = 2;
 }
 
 
