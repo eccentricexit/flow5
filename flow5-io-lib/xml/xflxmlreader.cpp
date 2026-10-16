@@ -257,7 +257,7 @@ void XflXmlReader::readInertia(Inertia &inertia, double lengthunit, double massu
         {
             inertia.setIzz_s(readElementText().toDouble()*inertiaunit);
         }
-        else if (name().compare(QString("CoG_Izz"), Qt::CaseInsensitive)==0)
+        else if (name().compare(QString("CoG_Ixz"), Qt::CaseInsensitive)==0)
         {
             inertia.setIxz_s(readElementText().toDouble()*inertiaunit);
         }
