@@ -197,7 +197,7 @@ class FL5LIB_EXPORT WingXfl : public Part
         std::vector<Node> const &nodes() const {return m_TriMesh.nodes();}
 
         int nXPanels() const {return m_Section.front().m_NXPanels;} /** Returns the number of chordwise quad panels at the first span section */
-        int nXPanel3() const {return m_Section.front().m_NXPanels *2;}/** Returns the number of chordwise triangular panels at the first span section */
+        int nXPanel3() const {return m_Section.front().m_NXPanels *Surface::s_nCellTriangles;}/** Returns the number of chordwise triangular panels at the first span section */
 
         void setNXPanels(int iSection, int nx) {if(iSection>=0 && iSection<nSections()) m_Section[iSection].m_NXPanels = std::max(1,nx);}
         void setNYPanels(int iSection, int ny) {if(iSection>=0 && iSection<nSections()) m_Section[iSection].m_NYPanels = std::max(1,ny);}

@@ -1975,6 +1975,9 @@ int PlaneXfl::sealFlapEnds(std::vector<Panel3> const &panel3, std::vector<Node> 
                     }
                 }
             }
+            // the end strips are warped, not turned: their cells' centre nodes go back to the mean of their corners (uav#200)
+            sa.recentreCellNodes(panel3, node);
+            sb.recentreCellNodes(panel3, node);
         }
     }
     return nMoved;

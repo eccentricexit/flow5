@@ -246,6 +246,13 @@ class FL5LIB_EXPORT Surface
         void makePanelNodes(std::vector<Node> &nodes, bool bMakeLeftNodes, bool bMidSurface) const;
 
         void makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &nodes, int ip3start, bool bThickSurfaces, int nTipStrips, int &leftnodeidx, int &rightnodeindex);
+        bool isCellCentreNode(int iNode) const {return iNode>=m_FirstCentreNode && iNode<m_FirstCentreNode+m_nCentreNodes;}
+        void recentreCellNodes(std::vector<Panel3> const &panel3, std::vector<Node> &node) const;
+
+        /** The triangles of a quad cell of the surface's strips (Surface::makeTriPanels(), uav#200): each cell is split about a centre node, the mean of
+         *  its four corners, into its downstream triangle, its side A and side B triangles and its upstream triangle, in that order along the strip.
+         *  The tip patches keep two triangles a cell. */
+        static constexpr int s_nCellTriangles = 4;
         int makeQuadPanels(std::vector<Panel4> &panel4list, int &nWakeColumn, bool bThickSurface, int nTipStrips);
 
         int isNode(Vector3d const &Pt, std::vector<Panel4> const & panel4list) const;
@@ -341,6 +348,7 @@ class FL5LIB_EXPORT Surface
         std::vector<int> m_Panel3List;    /**< the list of panel3 indexes of this surface */
         std::vector<int> m_Panel4List;    /**< the list of panel4 indexes of this surface */
         int m_FirstStripPanelIndex, m_LastStripPanelIndex; /**< temporary fields used to connect center-left and center-right surfaces */
+        int m_FirstCentreNode, m_nCentreNodes; /**< the cells' centre nodes, made by makeTriPanels(), in the node array it was given */
 
 
         Vector3d m_LA;              /**< the Surface's leading left point */

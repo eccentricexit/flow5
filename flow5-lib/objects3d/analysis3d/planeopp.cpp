@@ -1383,7 +1383,7 @@ void PlaneOpp::exportPanel3DataToString(Plane const *pPlane, PlanePolar const *p
                     iStrip++;
                     out << std::format("Strip {:d}\n", iStrip);
 
-                    for(int l=0; l<surf.NXPanels() * coef *2; l++)
+                    for(int l=0; l<surf.NXPanels() * coef *Surface::s_nCellTriangles; l++)
                     {
                         Panel3 const &p3 = pPlaneXfl->panel3At(pPlaneXfl->wingAt(iw)->firstPanel3Index() + p);
 
