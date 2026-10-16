@@ -1554,9 +1554,11 @@ void Panel3::doubletN4023Velocity(Vector3d const &C, bool , Vector3d &V, double 
         {
             //no contribution
         }
-        else if (sqrt(hx*hx+hy*hy+hz*hz)<=coreradius && ax*sx+ay*sy+az*sz>=0.0 && bx*sx+by*sy+bz*sz<=0.0)
+        else if (hx*hx+hy*hy+hz*hz <= coreradius*coreradius*(sx*sx+sy*sy+sz*sz) && ax*sx+ay*sy+az*sz>=0.0 && bx*sx+by*sy+bz*sz<=0.0)
         {
-            //no contribution
+            // the point is within the core radius of the side: no contribution.
+            // |a x s| is the distance times the side's length: compared with the core radius alone it dropped a long side
+            // up to 1e-6/length from it, 0.3 mm for a 3.5 mm side, the collocation points of sliver triangles included (uav#200)
         }
         else
         {
