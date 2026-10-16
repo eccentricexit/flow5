@@ -281,6 +281,7 @@ class FL5LIB_EXPORT PlanePolar : public Polar3d
         std::vector<double>  m_Beta;       /**< the sideslip angle */
         std::vector<double>  m_Phi;       /**< the bank angle */
         std::vector<double>  m_QInfinite;  /**< the free stream speed - type 2 WPolars */
+        std::vector<Vector3d> m_Rates;     /**< the body rates (p, q, r) of a T8 point, rad/s; zero otherwise and on points read from a project file */
 
         std::vector<AeroForces> m_AF;
 

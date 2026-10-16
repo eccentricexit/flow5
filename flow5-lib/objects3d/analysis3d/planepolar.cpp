@@ -135,6 +135,7 @@ void PlanePolar::setDefaults()
     m_Ctrl.clear();
     m_Beta.clear();
     m_Phi.clear();
+    m_Rates.clear();
     m_QInfinite.clear();
     m_AF.clear();
 
@@ -192,6 +193,7 @@ void PlanePolar::insertPOppDataAt(int pos, PlaneOpp const *pPOpp)
     m_Alpha.insert(m_Alpha.begin()+pos, pPOpp->alpha());
     m_Beta.insert(m_Beta.begin()+pos, pPOpp->beta());
     m_Phi.insert(m_Phi.begin()+pos, pPOpp->phi());
+    m_Rates.insert(m_Rates.begin()+pos, pPOpp->rates());
     m_QInfinite.insert(m_QInfinite.begin()+pos, pPOpp->QInf());
 
     m_AF.insert(m_AF.begin()+pos, pPOpp->m_AF);
@@ -241,6 +243,7 @@ void PlanePolar::insertDataAt(int pos, double Alpha, double Beta, double Phi, do
     m_Alpha.insert(m_Alpha.begin()+pos, Alpha);
     m_Beta.insert(m_Beta.begin()+pos, Beta);
     m_Phi.insert(m_Phi.begin()+pos, Phi);
+    m_Rates.insert(m_Rates.begin()+pos, Vector3d());
     m_QInfinite.insert(m_QInfinite.begin()+pos, QInf);
 
     m_MaxBending.insert(m_MaxBending.begin()+pos, Cb);
@@ -259,6 +262,7 @@ void PlanePolar::resizeData(int newsize)
     m_Alpha.resize(newsize);
     m_Beta.resize(newsize);
     m_Phi.resize(newsize);
+    m_Rates.resize(newsize);
     m_QInfinite.resize(newsize);
 
     m_MaxBending.resize(newsize);
@@ -362,10 +366,30 @@ void PlanePolar::addPlaneOpPointData(PlaneOpp const *pPOpp)
                     {
                         if (fabs(pPOpp->m_QInf - m_QInfinite.at(i)) < d)
                         {
-                            // then erase former result
-                            replacePOppDataAt(i, pPOpp);
-                            bInserted = true;
-                            break;
+                            // the same state only if the body rates are the same too (uav: a straight and a rotating point at one
+                            // alpha, beta and speed are two points, as Objects3d::insertPlaneOpp keeps them); sort by the rates (p, q, r)
+                            Vector3d const ro = i<int(m_Rates.size()) ? m_Rates.at(i) : Vector3d();
+                            double const rn[3] = {pPOpp->rates().x, pPOpp->rates().y, pPOpp->rates().z};
+                            double const rr[3] = {ro.x, ro.y, ro.z};
+                            int cmp = 0;
+                            for(int k=0; k<3 && cmp==0; k++)
+                            {
+                                if     (rn[k] < rr[k]-1.e-9) cmp = -1;
+                                else if(rn[k] > rr[k]+1.e-9) cmp = +1;
+                            }
+                            if(cmp==0)
+                            {
+                                // then erase former result
+                                replacePOppDataAt(i, pPOpp);
+                                bInserted = true;
+                                break;
+                            }
+                            else if(cmp<0)
+                            {
+                                insertPOppDataAt(i, pPOpp);
+                                bInserted = true;
+                                break;
+                            }
                         }
                         else if (pPOpp->m_QInf < m_QInfinite.at(i))
                         {
@@ -712,6 +736,7 @@ void PlanePolar::removeAt(int index)
     m_Alpha.erase(m_Alpha.begin()+index);
     m_Beta.erase(m_Beta.begin()+index);
     m_Phi.erase(m_Phi.begin()+index);
+    m_Rates.erase(m_Rates.begin()+index);
 
     m_AF.erase(m_AF.begin()+index);
 
@@ -734,6 +759,7 @@ void PlanePolar::insertDataPointAt(int index, bool bAfter)
     m_Alpha.insert(m_Alpha.begin()+index, 0);
     m_Beta.insert(m_Beta.begin()+index, 0);
     m_Phi.insert(m_Phi.begin()+index, 0);
+    m_Rates.insert(m_Rates.begin()+index, Vector3d());
 
     m_AF.insert(m_AF.begin()+index, AeroForces());
 
@@ -757,6 +783,7 @@ void PlanePolar::clearPolarData()
     m_Alpha.clear();
     m_Beta.clear();
     m_Phi.clear();
+    m_Rates.clear();
 
     m_AF.clear();
 
@@ -811,6 +838,7 @@ void PlanePolar::copy(const PlanePolar *pWPolar)
         m_Alpha.push_back(     pWPolar->m_Alpha.at(i));
         m_Beta.push_back(      pWPolar->m_Beta.at(i));
         m_Phi.push_back(       pWPolar->m_Phi.at(i));
+        m_Rates.push_back(i<int(pWPolar->m_Rates.size()) ? pWPolar->m_Rates.at(i) : Vector3d());
 
         m_QInfinite.push_back( pWPolar->m_QInfinite.at(i));
 
