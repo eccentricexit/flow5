@@ -47,8 +47,10 @@ class FL5LIB_EXPORT Plane : public fl5Object
 
         virtual void duplicate(Plane const*pOtherPlane);
         virtual void copyMetaData(Plane const *pOtherPlane) = 0;
-        virtual void makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh) = 0;
-        virtual void makeTriMesh(bool bThickSurfaces = false) = 0;
+        /** bCentredCells: the triangle mesh splits each quad cell of the wings' strips into four triangles about its centre node instead of
+         *  two along a diagonal (Surface::makeTriPanels(), uav#200); false, flow5's mesh, unless the caller asks */
+        virtual void makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh, bool bCentredCells=false) = 0;
+        virtual void makeTriMesh(bool bThickSurfaces = false, bool bCentredCells=false) = 0;
         virtual bool connectTriMesh(bool bRefTriMesh, bool bConnectTE, bool bMultithreaded=true) = 0;
 
         virtual int nParts() const = 0;

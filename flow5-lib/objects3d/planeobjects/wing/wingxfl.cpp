@@ -51,6 +51,7 @@ WingXfl::WingXfl(xfl::enumType type) : Part()
 {
 
     m_nPanel3 = m_nPanel4 = 0;
+    m_nCellTriangles = 2;
     m_nNodes = 0;
 
     m_MAChord    = 0.0;// mean aero chord
@@ -191,7 +192,11 @@ void WingXfl::computeGeometry()
 }
 
 
-int WingXfl::makeTriPanels(int ip3start, int indStart, bool bThickSurfaces)
+/**
+ * Makes the wing's triangle mesh, surface by surface (Surface::makeTriPanels()).
+ * @param bCentredCells true: each quad cell of the strips is split into four triangles about its centre node instead of two along a diagonal (uav#200).
+ */
+int WingXfl::makeTriPanels(int ip3start, int indStart, bool bThickSurfaces, bool bCentredCells)
 {
     m_StripStartNodes.clear();
 
@@ -205,7 +210,7 @@ int WingXfl::makeTriPanels(int ip3start, int indStart, bool bThickSurfaces)
     for(int jSurf=0; jSurf<nSurfaces(); jSurf++)
     {
         Surface &surf = m_Surface[jSurf];
-        surf.makeTriPanels(m_TriMesh.panels(), m_TriMesh.nodes(), ip3start, bThickSurfaces, m_nTipStrips, leftnodeidx, rightnodeidx);
+        surf.makeTriPanels(m_TriMesh.panels(), m_TriMesh.nodes(), ip3start, bThickSurfaces, m_nTipStrips, leftnodeidx, rightnodeidx, bCentredCells);
 
         if(std::find(m_StripStartNodes.begin(), m_StripStartNodes.end(), leftnodeidx) == m_StripStartNodes.end())
             m_StripStartNodes.push_back(leftnodeidx);
@@ -217,6 +222,7 @@ int WingXfl::makeTriPanels(int ip3start, int indStart, bool bThickSurfaces)
     }
 
     m_nPanel3 = nWingPanels;
+    m_nCellTriangles = bCentredCells ? 4 : 2;
     m_nNodes = m_TriMesh.nNodes()-m_FirstNodeIndex;
 
     return nWingPanels;
@@ -888,7 +894,7 @@ bool WingXfl::connectInnerSurfaces(std::vector<Panel3> &panels, bool bThickSurfa
         // this is done by setting the right side panels' node indexes to those of the left side panels;
         // 1 or two vertices are assigned for each right side panel
         // leaves some nodes of the right surface dangling, but they can be kept unused in the array
-        for(int ir=0; ir<sr.NXPanels()*2*coef; ir++)  // top and bottom * 2 triangles
+        for(int ir=0; ir<sr.NXPanels()*sr.nCellTriangles()*coef; ir++)  // top and bottom * the triangles of a cell
         {
             int nr = sr.m_FirstStripPanelIndex + ir;
             if(nr<0 || nr>=int(panels.size()))
@@ -896,7 +902,7 @@ bool WingXfl::connectInnerSurfaces(std::vector<Panel3> &panels, bool bThickSurfa
                 return false;
             }
             Panel3 &pr = panels[nr];
-            for(int il=0; il<sl.NXPanels()*2*coef; il++)  // top and bottom * 2 triangles
+            for(int il=0; il<sl.NXPanels()*sl.nCellTriangles()*coef; il++)  // top and bottom * the triangles of a cell
             {
                 int nl = sl.m_LastStripPanelIndex + il;
                 Panel3 &pl = panels[nl];
@@ -915,6 +921,7 @@ bool WingXfl::connectInnerSurfaces(std::vector<Panel3> &panels, bool bThickSurfa
                     {
                         for(int ivl=0; ivl<3; ivl++)
                         {
+                            if(sr.isCellCentreNode(pr.vertexAt(ivr).index()) || sl.isCellCentreNode(pl.vertexAt(ivl).index())) continue;
                             if(pr.vertexAt(ivr).isSame(pl.vertexAt(ivl), 0.0005))
                             {
                                 pr.setVertex(ivr, pl.vertexAt(ivl));// could also only set the index
@@ -969,7 +976,7 @@ bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, 
     // this is done by setting the right side panels' node indexes to those of the left side panels;
     // 1 or two vertices are assigned for each right side panel
     // leaves some nodes of the right surface dangling, but they can be kept unused in the array
-    for(int ir=0; ir<sr.NXPanels()*2*coef; ir++)  // top and bottom * 2 triangles
+    for(int ir=0; ir<sr.NXPanels()*sr.nCellTriangles()*coef; ir++)  // top and bottom * the triangles of a cell
     {
         int nr = sr.m_FirstStripPanelIndex + ir;
 
@@ -979,7 +986,7 @@ bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, 
 
 //        if(pr.isFlapPanel() && !bConnectFlaps) continue;
 
-        for(int il=0; il<sl.NXPanels()*2*coef; il++)  // top and bottom * 2 triangles
+        for(int il=0; il<sl.NXPanels()*sl.nCellTriangles()*coef; il++)  // top and bottom * the triangles of a cell
         {
             int nl = sl.m_LastStripPanelIndex + il;
             Panel3 &pl = panels[nl];
@@ -1003,6 +1010,8 @@ bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, 
                     {
                         if(rightnode.isFlapNode() || leftnode.isFlapNode()) continue;
                     }
+                    // a cell's centre node lies inside its cell, half a strip from the junction: never the same node
+                    if(sr.isCellCentreNode(rightnode.index()) || sl.isCellCentreNode(leftnode.index())) continue;
 
                     if(rightnode.isSame(leftnode, 0.0001))
                     {
@@ -1125,6 +1134,7 @@ void WingXfl::duplicate(WingXfl const &aWing)
     m_FirstPanel4Index = aWing.m_FirstPanel4Index;
     m_nPanel3 = aWing.m_nPanel3;
     m_nPanel4 = aWing.m_nPanel4;
+    m_nCellTriangles = aWing.m_nCellTriangles;
     m_nNodes  = aWing.m_nNodes;
 
     m_StripStartNodes = aWing.m_StripStartNodes;
@@ -1522,7 +1532,7 @@ void WingXfl::panelComputeBending(const std::vector<Panel3> &panel3list, bool bT
             ypos.push_back(p3.CoG().y);
             zpos.push_back(p3.CoG().z);
 
-            p += coef*surf.NXPanels() *2;
+            p += coef*surf.NXPanels() *surf.nCellTriangles();
         }
     }
 
@@ -1685,8 +1695,9 @@ int WingXfl::quadTotal(bool bThinSurface) const
 
 int WingXfl::nTriangles() const
 {
-    int total = quadTotal(false);
-    total *=2; // two triangles/quad
+    int nTip = m_Section.empty() ? 0 : 2*m_nTipStrips*m_Section.front().nXPanels(); // the tip patches' quads, see quadTotal()
+    int total = (quadTotal(false)-nTip) * m_nCellTriangles; // the strips' cells
+    total += nTip*2; // two triangles/quad on the tip patches
     total -= m_nTipStrips*2*2; // the leading and trailingh quads at the tip patches are degenerate.
 
     return total;

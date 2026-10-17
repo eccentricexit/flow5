@@ -68,9 +68,9 @@ class FL5LIB_EXPORT PlaneSTL : public Plane
         void duplicate(Plane const *pPlane) override;
         void duplicatePanels(Plane const *pPlane);
 
-        void makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh) override;
+        void makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh, bool bCentredCells=false) override;
 
-        void makeTriMesh(bool bThickSurfaces = false) override;
+        void makeTriMesh(bool bThickSurfaces = false, bool bCentredCells=false) override;
 
         int nParts() const override {return 0;}
         int nWings() const override {return 0;}

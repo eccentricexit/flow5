@@ -95,7 +95,7 @@ class FL5LIB_EXPORT PlaneXfl : public Plane
         void createSurfaces();
         void createWingSideNodes();
 
-        void makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh) override;
+        void makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh, bool bCentredCells=false) override;
         Fuse *makeNewFuse(Fuse::enumType bodytype);
         void joinSurfaces(const Surface &LeftSurf, const Surface &RightSurf);
 
@@ -201,7 +201,7 @@ class FL5LIB_EXPORT PlaneXfl : public Plane
 
         std::string planeData(bool bOtherWings=false) const override;
 
-        void makeTriMesh(bool bThickSurfaces=false) override;
+        void makeTriMesh(bool bThickSurfaces=false, bool bCentredCells=false) override;
         bool connectTriMesh(bool bRefTriMesh, bool bConnectTE, bool bMultiThreaded=true) override;
         void makeQuadMesh(bool bThickSurfaces, bool bIgnoreFusePanels);
         void restoreMesh() override;

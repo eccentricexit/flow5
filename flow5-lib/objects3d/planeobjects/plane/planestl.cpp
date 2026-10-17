@@ -89,7 +89,7 @@ void PlaneSTL::duplicatePanels(Plane const *pPlane)
 
 
 /** Assumes the base triangles have been set, and makers evertyhing else */
-void PlaneSTL::makePlane(bool , bool , bool )
+void PlaneSTL::makePlane(bool , bool , bool , bool )
 {
     makeTriangleNodes();
     makeNodeNormals();
@@ -217,7 +217,7 @@ void PlaneSTL::translate(Vector3d const &T)
 }
 
 
-void PlaneSTL::makeTriMesh(bool)
+void PlaneSTL::makeTriMesh(bool, bool)
 {
     std::string log, prefix;
     m_RefTriMesh.makeMeshFromTriangles(m_Triangulation.triangles(), 0, xfl::NOSURFACE, log, prefix);
