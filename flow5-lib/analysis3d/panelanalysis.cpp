@@ -872,8 +872,10 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         // 3. The free-stream force on the sheet's vorticity is applied where the vorticity is (m_bSideslipVorticity). On thick surfaces the vorticity of the
         //    closed surface is the thickness' as well, which the free stream alone does not load (Clb 0.25 against 0.13 thin on one wing): the force is put
         //    on the lifting vorticity, the jump mu_top - mu_bottom on the strips' mean surface (P3Analysis::meanSheetVorticityLoad(), uav#80).
-        //    Left out on thick surfaces, as on the thin sheet and in AVL: the moment of the fluid's impulse, -V x (M_a V), which a body of thickness
-        //    carries in a translation (Munk's moment; flow5tools/dev/addedmass.py measures it).
+        //    Left out on the triangle methods (uav#188): the moment of the induced drag's distribution in sideslip, a wing's own induced yaw, which neither
+        //    the far field nor the Kutta-Joukowski load of a doublet sheet gives (P3Analysis::forces()); VLM2 has it in its lattice's near-field load
+        //    (P4Analysis::boundVortexLoad()). Left out on thick surfaces, as on the thin sheet and in AVL: the moment of the fluid's impulse, -V x (M_a V),
+        //    which a body of thickness carries in a translation (Munk's moment; flow5tools/dev/addedmass.py measures it).
         bool const bSideslipModel = true;
         if(bSideslipModel)
         {

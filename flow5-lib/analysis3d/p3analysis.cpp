@@ -1618,7 +1618,12 @@ void P3Analysis::meanSheetVorticityLoad(double const *Mu3, std::vector<Vector3d>
 * In the sideslip derivatives m_MomentFF puts the free-stream part of the strips' forces on the vorticity of the sheet instead of the quarter points
 * (sheetVorticityLoad(), thin surfaces; uav#79): the strips' force V x Gamma l_TE is right as a total (Stokes), but lumps at the quarter point the chordwise
 * vorticity d(mu)/dy between the strips, whose force in a sideslip carries the rolling and yawing moments. Thick strips put it on their lifting vorticity,
-* the jump mu_top - mu_bottom on their mean surface (meanSheetVorticityLoad(), uav#80).
+* the jump mu_top - mu_bottom on their mean surface (meanSheetVorticityLoad(), uav#80). The Trefftz-plane part of the strips' forces, their induced drag,
+* is in m_ForceFF but not in m_MomentFF (uav#188): a wing's induced yaw in sideslip is the moment of the induced drag's distribution, which the far field does
+* not give (Munk: the total is fixed, the parts depend on the stagger) and the near-field Kutta-Joukowski load of a doublet sheet does not converge to (its
+* edge lines at the leading edge recover 78 percent of the suction at 13 and 26 chordwise cells). Until then it sat at the strips' quarter points,
+* perpendicular to the trailing edge: a convention, which read 1.2 to 1.3 times less than the lattice's near-field load on swept wings. The triangle methods
+* leave a wing's own induced yaw out, and the runner says so; VLM2 has it (P4Analysis::boundVortexLoad()).
 *
 * In rotating states (m_bRotationSuction) each strip's leading-edge suction is directed perpendicular to the leading edge, in the forces and the moments:
 * without rotation the strips' far-field force is exact in total, with it the near-field force is the reference (flow5#28).
@@ -1715,23 +1720,14 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 // The thin strips need it too: their leading-edge force is the difference of this force and the panel forces
                 {
                     Vector3d WgFF = trefftzWash(p3);
-                    Vector3d wash = WgFF;
                     WgFF += VInf.at(i3);
                     stripforce  =  WgFF * vortex;
                     stripforce *= GammaStrip * m_pPolar3d->density();     // N
                     m_ForceFF += stripforce;
                     Vector3d quarterpoint = stripQuarterPoint(p3);
-                    if(m_bFarField)
-                    {
-                        if(bSheetLoad)
-                        {
-                            // only the Trefftz-plane part is lumped at the quarter point: the free-stream part is put on the vortex lines of the sheet below
-                            Vector3d inducedforce = wash * vortex;
-                            inducedforce *= GammaStrip * m_pPolar3d->density();     // N
-                            m_MomentFF += (quarterpoint - CoG) * inducedforce;   // N.m
-                        }
-                        else m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
-                    }
+                    // with bSheetLoad the strip's moment is that of the free-stream force on the sheet's vorticity below; the Trefftz-plane part
+                    // (the strip's induced drag) has no derived place on a doublet sheet and is left out of the moment (uav#188)
+                    if(m_bFarField && !bSheetLoad) m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
 
                     // walk the strip upstream, to its leading edge
                     int iStrip = int(stripFF.size());
@@ -1798,10 +1794,9 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 m_ForceFF += stripforce;
                 if(bSheetLoad)
                 {
-                    // as the thin strips: the Trefftz-plane part at the quarter point, the free-stream part on the mean surface's vorticity below
+                    // as the thin strips: the free-stream part on the mean surface's vorticity below, the Trefftz-plane part left out of the moment (uav#188)
                     Vector3d inducedforce = vortex * wash;
                     inducedforce *= GammaStrip * m_pPolar3d->density();     // N
-                    m_MomentFF += (quarterpoint - CoG) * inducedforce;   // N.m
                     thickFreeStream.push_back({i3, stripforce - inducedforce});
                 }
                 else m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
