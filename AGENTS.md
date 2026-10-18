@@ -16,6 +16,8 @@ what it measured before and after.
   out; where they differ, the difference must be the term one has and the other lacks, in size and in sign. A difference with
   no such term, or larger than the term explains, or growing with the mesh, is a defect in one of them until shown otherwise:
   derive what each should give and find which is wrong. A reference code is one more method in this sense.
+- **A known missing term is a task, not a note**, when a result rests on it: leaving a number out and saying so is the honest
+  state of the solver today, never the destination. Put the physics in, with its derivation and its measurement.
 - **Breaking changes are welcome** when they serve the headless use: upstream compatibility, the GUI's conveniences and the
   `.fl5` export yield to a correct headless result. Say in the PR what breaks.
 - **Every physical model is documented at its function**: what it computes, its basis (the equation, the paper, the AVL
