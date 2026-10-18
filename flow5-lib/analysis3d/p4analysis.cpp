@@ -41,6 +41,10 @@
 #include <stabderivatives.h>
 #include <vortex.h>
 
+/** the half step, in radians, of the central differences over the yaw of the trailing legs (yawedWakeProduct(), boundVortexLoad()):
+ * far larger than a derivative's own perturbation, so that the quadrature noise is not amplified, and small enough for the linearisation */
+static constexpr double YAWED_WAKE_STEP = 1.0e-2;
+
 
 
 P4Analysis::P4Analysis() : PanelAnalysis()
@@ -1018,12 +1022,14 @@ void P4Analysis::VLMGetVortexInfluence(Panel4 const &p4, Vector3d const &C, doub
 * 2. The control derivatives' moments (PlaneTask::computeControlDerivatives() takes m_MomentFF for VLM2): an aileron's yaw is the
 *    difference of the induced drag of the two wings, which only the near-field load places. Their forces stay the far-field ones: with a
 *    uniform onset that is exact in total by momentum (AVL's near-field and Trefftz-plane forces agree there).
-* 3. The sideslip derivatives (m_bSideslipVorticity, the model of the triangle methods, uav#79): the wake yawed with the free stream in the
-*    circulation (yawedWakeProduct()), the far-field side force with its Trefftz plane perpendicular to that wake (m_bSideslipFarField), and
-*    in m_MomentFF the free-stream force of the rings' chordwise legs on the sheet added to the near-field load. Limit: the velocity the wake
-*    induces at the bound vortices is the unyawed lattice's, as the triangle methods take the induced part from the Trefftz plane: with the
-*    yawed legs there, Cnb over the classical wing value (NACA TN 1581 eq 21) grew with the aspect ratio, 1.8 at A 10 and 2.1 at A 40
-*    unswept, where it should tend to 1 (1.38 and 1.13 without, the triangle methods 1.30 and 1.08).
+* 3. The sideslip derivatives (m_bSideslipVorticity; uav#79, uav#188): the wake yawed with the free stream in the circulation
+*    (yawedWakeProduct()), the far-field side force with its Trefftz plane perpendicular to that wake (m_bSideslipFarField), and in
+*    m_MomentFF the near-field load of the bound vortices in the velocity the yawed lattice induces at them, plus the free-stream force of
+*    the rings' chordwise legs on the sheet (boundVortexLoad()). Until uav#188 the bound vortices took the unyawed lattice's velocity, kept
+*    because with the yawed legs a wing's Cnb over NACA TN 1581 eq 21 grew with the aspect ratio (1.8 at A 10, 2.1 at A 40 unswept) where it
+*    was expected to tend to 1. It need not: a trailing leg leaving a lifting line at an angle induces a sidewash whose span integral is
+*    log(span/chord), so the thin-wing Cnb has no chord-free limit and that formula (strip theory, Toll and Queijo 1948) is not one. An
+*    independent lattice (flow5tools/dev/lattice.py) gives the same values. Limit: the chordwise legs' own induced load (boundVortexLoad()).
 * 4. The moment of every other state (the polar's Cm through PlaneTask::computePlane(), the u and w derivatives, so Cma and the neutral
 *    point; uav#187) is the near-field load's too. Basis: the on-body moment crosses each bound vortex with the free-stream direction only,
 *    which leaves out the force of the induced velocity on it, the induced drag and its lever: a wing with dihedral or sweep has one in
@@ -1235,7 +1241,15 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
  * segment's midpoint (VInf of the panel and the rotation m_Omega) and v the velocity the lattice induces there, the segment's own being zero.
  * The chordwise legs and the trailing legs carry no force (AVL's default, LTRFORCE), except in the sideslip derivatives
  * (m_bSideslipVorticity): there the free-stream force of each ring's chordwise legs on the sheet, up to the trailing edge, is added at their
- * midpoints, the vorticity load of the triangle methods (uav#79). Thin panels only (VLM2); fuse panels are left out.
+ * midpoints, the vorticity load of the triangle methods (uav#79), and the velocity at the bound vortices carries the yaw of the trailing legs
+ * with the free stream to first order (uav#188: yawedWakeVelocityDerivative() times the state's yaw, the linearisation of yawedWakeProduct()
+ * that the circulation already has; the panels makeYawedWakeSkip() leaves on the unyawed wake, a fin in the wing's wake, take the unyawed
+ * velocity, as their rows do in the circulation). Each leg is loaded with the velocity the lattice resolves at it: at a bound vortex the
+ * downwash, which the lattice solves for; at a chordwise leg the free stream alone, since the sheet's in-plane velocity there is zero on a
+ * planar sheet and unresolved on a twisted one (loaded with it, the swept twisted flying-wing fixture's Clb read -0.0066 at 13 chordwise
+ * panels against -0.0479 at 52, where the free-stream load reads -0.0478 at every count), and the wake's velocity there is a term of 1 to 7
+ * percent of a wing's own Cnb that converges only logarithmically (an independent lattice, flow5tools/dev/lattice.py).
+ * Thin panels only (VLM2); fuse panels are left out.
  * Force (N) and Moment (N.m, about CoG); panelMoment, when given, each panel's share of the moment (N.m, about CoG, zero off the mid-surface).
  */
 void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::vector<Vector3d> const &VInf, Vector3d const &CoG,
@@ -1243,6 +1257,10 @@ void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::v
 {
     int N = nPanels();
     std::vector<Vector3d> F(N), M(N);
+    // the state's yaw: the lateral part of the onset flow's direction, the angle the trailing legs leave the body x axis by
+    double theta = 0.0;
+    if(m_bSideslipVorticity && !VInf.empty() && VInf.front().norm()>0.0) theta = atan2(VInf.front().y, VInf.front().x);
+    bool const bYaw = theta!=0.0 && int(m_YawedWakeSkip.size())==N;
     auto load = [&](int i0, int i1)
     {
         for(int p=i0; p<i1; p++)
@@ -1253,15 +1271,17 @@ void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::v
             if(!p4.isLeading()) G -= Mu4[p+1];
             Vector3d l = p4.m_VB - p4.m_VA;
             Vector3d mid = (p4.m_VA + p4.m_VB)*0.5;
+            // the velocity at the bound vortex: the onset there and what the lattice induces, with its wake yawed
             Vector3d v;
             getVelocityVector(mid, Mu4, Sigma4, v, Vortex::coreRadius(), false, false);
+            if(bYaw && !m_YawedWakeSkip[p]) v += yawedWakeVelocityDerivative(mid, Mu4, YAWED_WAKE_STEP) * theta;
             v += VInf.at(p) + (mid - p4.CoG()) * m_Omega;
             F[p] = (v * l) * G;
             M[p] = (mid - CoG) * F[p];
 
             if(m_bSideslipVorticity)
             {
-                // the ring's two chordwise legs, from its bound vortex to the next one downstream, or to the trailing edge
+                // the ring's two chordwise legs, from its bound vortex to the next one downstream, or to the trailing edge, with the free stream
                 Vector3d TA, TB;
                 if(p4.isTrailing()) {TA = p4.TA();                  TB = p4.TB();}
                 else                {TA = m_Panel4.at(p-1).m_VA;    TB = m_Panel4.at(p-1).m_VB;}
@@ -1297,17 +1317,15 @@ void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::v
 
 
 /**
- * product = (dA_wake/dtheta).mu for VLM2: the derivative of the influence matrix with respect to the yaw of the trailing legs of the
- * trailing panels' horseshoes (they leave along (cos theta, sin theta, 0) from the points a quarter panel behind the trailing edge where
- * the rings close), by a central difference between +theta and -theta, applied to the circulations mu without building the matrix.
- * The rest of each column (the rings and the horseshoes' bound legs) does not depend on the yaw. As P3Analysis::yawedWakeProduct(), the
- * panels of another wing within half the reference chord of a trailing panel's sheet and downstream of it keep the unyawed wake: the
- * velocity of the legs jumps across the sheet, so that the yaw derivative of such a row is not resolved (a fin in the wing's wake).
+ * The sideslip derivatives yaw the trailing legs of the trailing panels' horseshoes with the free stream (yawedWakeProduct() in the circulation,
+ * boundVortexLoad() in the velocity the lattice induces at its legs). This lists those panels (m_YawedWakeTrailing) and marks the panels that
+ * keep the unyawed wake (m_YawedWakeSkip, counted in m_nYawedWakeRowsKept): as P3Analysis::yawedWakeProduct(), the panels of another wing
+ * within half the reference chord of a trailing panel's sheet and downstream of it, where the velocity of the legs jumps across the sheet, so
+ * that the yaw derivative is not resolved (a fin in the wing's wake).
  */
-bool P4Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product)
+void P4Analysis::makeYawedWakeSkip()
 {
     int N = nPanels();
-    if(!m_pPolar3d || !m_pPolar3d->isVLM2() || m_pPolar3d->bVortonWake() || int(mu.size())!=N || theta<=0.0) return false;
 
     // the wings of the mesh: panels sharing a node are one piece
     std::vector<int> parent(N);
@@ -1332,14 +1350,14 @@ bool P4Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, s
         }
     }
 
-    std::vector<int> trailing;
-    for(int k=0; k<N; k++) if(m_Panel4.at(k).isTrailing() && m_Panel4.at(k).isMidPanel()) trailing.push_back(k);
+    m_YawedWakeTrailing.clear();
+    for(int k=0; k<N; k++) if(m_Panel4.at(k).isTrailing() && m_Panel4.at(k).isMidPanel()) m_YawedWakeTrailing.push_back(k);
 
     double clearance = 0.5 * m_pPolar3d->referenceChordLength();
-    std::vector<char> skip(N, 0);
+    m_YawedWakeSkip.assign(N, 0);
     for(int i=0; i<N; i++)
     {
-        for(int k : trailing)
+        for(int k : m_YawedWakeTrailing)
         {
             if(find(i)==find(k)) continue;
             Panel4 const &pk = m_Panel4.at(k);
@@ -1353,35 +1371,70 @@ bool P4Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, s
             if(nn<1e-9) continue;
             nw *= 1.0/nn;
             Vector3d d = m_Panel4.at(i).m_CtrlPt - Tl;
-            if(d.x>0.0 && fabs(d.dot(nw))<clearance && d.dot(e)>-clearance && d.dot(e)<L+clearance) {skip[i] = 1; break;}
+            if(d.x>0.0 && fabs(d.dot(nw))<clearance && d.dot(e)>-clearance && d.dot(e)<L+clearance) {m_YawedWakeSkip[i] = 1; break;}
         }
     }
     m_nYawedWakeRowsKept = 0;
-    for(char c : skip) m_nYawedWakeRowsKept += c;
+    for(char c : m_YawedWakeSkip) m_nYawedWakeRowsKept += c;
     if(m_nYawedWakeRowsKept>0)
         traceStdLog(std::format("      sideslip derivatives: {:d} panels lie within half a reference chord of another surface's wake sheet and keep the unyawed wake\n", m_nYawedWakeRowsKept));
+}
 
+
+/**
+ * The velocity at C of the two trailing legs of trailing panel pk yawed by theta from the body x axis, for a unit circulation: VLMCmnVelocity()
+ * without its bound leg, the legs leaving from the points a quarter panel behind the trailing edge where the rings close (VLMGetVortexInfluence()).
+ */
+Vector3d P4Analysis::trailingLegsVelocity(Panel4 const &pk, Vector3d const &C, double theta) const
+{
     double fardist = m_pPolar3d->TrefftzDistance();
-    bool bMirror = m_pPolar3d->bGroundEffect() || m_pPolar3d->bFreeSurfaceEffect();
-    double mirror = m_pPolar3d->bGroundEffect() ? 1.0 : -1.0;
-    // the velocity of the two trailing legs of trailing panel k at C, yawed by th, for a unit circulation (VLMCmnVelocity without its bound leg)
-    auto legs = [&](Panel4 const &pk, Vector3d const &C, double th)
+    Vector3d A = pk.TA(), B = pk.TB();
+    A.x += (pk.TA().x-pk.m_VA.x)/3.0;
+    B.x += (pk.TB().x-pk.m_VB.x)/3.0;
+    Vector3d far(cos(theta)*fardist, sin(theta)*fardist, 0.0);
+    Vector3d V = vortexInducedVelocity(A+far, A, C, Vortex::coreRadius()) + vortexInducedVelocity(B, B+far, C, Vortex::coreRadius());
+    if(m_pPolar3d->bGroundEffect() || m_pPolar3d->bFreeSurfaceEffect())
     {
-        Vector3d A = pk.TA(), B = pk.TB();
-        A.x += (pk.TA().x-pk.m_VA.x)/3.0;     // as VLMGetVortexInfluence()
-        B.x += (pk.TB().x-pk.m_VB.x)/3.0;
-        Vector3d far(cos(th)*fardist, sin(th)*fardist, 0.0);
-        Vector3d V = vortexInducedVelocity(A+far, A, C, Vortex::coreRadius()) + vortexInducedVelocity(B, B+far, C, Vortex::coreRadius());
-        if(bMirror)
-        {
-            Vector3d CG(C.x, C.y, -C.z-2.0*m_pPolar3d->groundHeight());
-            Vector3d VG = vortexInducedVelocity(A+far, A, CG, Vortex::coreRadius()) + vortexInducedVelocity(B, B+far, CG, Vortex::coreRadius());
-            V.x += VG.x*mirror;
-            V.y += VG.y*mirror;
-            V.z -= VG.z*mirror;
-        }
-        return V;
-    };
+        double mirror = m_pPolar3d->bGroundEffect() ? 1.0 : -1.0;
+        Vector3d CG(C.x, C.y, -C.z-2.0*m_pPolar3d->groundHeight());
+        Vector3d VG = vortexInducedVelocity(A+far, A, CG, Vortex::coreRadius()) + vortexInducedVelocity(B, B+far, CG, Vortex::coreRadius());
+        V.x += VG.x*mirror;
+        V.y += VG.y*mirror;
+        V.z -= VG.z*mirror;
+    }
+    return V;
+}
+
+
+/**
+ * d(v_wake)/d(theta) at C: the derivative with respect to the yaw of the trailing legs of the velocity they induce there with the circulations mu,
+ * by a central difference between the legs yawed by +theta and -theta (makeYawedWakeSkip() lists the legs). A state yawed by a small angle has
+ * its wake's velocity at C changed by this times the angle, the linearisation that yawedWakeProduct() gives the circulation.
+ */
+Vector3d P4Analysis::yawedWakeVelocityDerivative(Vector3d const &C, double const *mu, double theta) const
+{
+    Vector3d dv;
+    for(int k : m_YawedWakeTrailing)
+    {
+        Panel4 const &pk = m_Panel4.at(k);
+        dv += (trailingLegsVelocity(pk, C, theta) - trailingLegsVelocity(pk, C, -theta)) * mu[k];
+    }
+    return dv * (1.0/(2.0*theta));
+}
+
+
+/**
+ * product = (dA_wake/dtheta).mu for VLM2: the derivative of the influence matrix with respect to the yaw of the trailing legs of the
+ * trailing panels' horseshoes (they leave along (cos theta, sin theta, 0) from the points a quarter panel behind the trailing edge where
+ * the rings close), by a central difference between +theta and -theta, applied to the circulations mu without building the matrix.
+ * The rest of each column (the rings and the horseshoes' bound legs) does not depend on the yaw. The panels makeYawedWakeSkip() marks keep
+ * the unyawed wake.
+ */
+bool P4Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product)
+{
+    int N = nPanels();
+    if(!m_pPolar3d || !m_pPolar3d->isVLM2() || m_pPolar3d->bVortonWake() || int(mu.size())!=N || theta<=0.0) return false;
+    makeYawedWakeSkip();
 
     product.assign(N, 0.0);
     auto rows = [&](int i0, int i1)
@@ -1389,14 +1442,8 @@ bool P4Analysis::yawedWakeProduct(double theta, std::vector<double> const &mu, s
         for(int i=i0; i<i1; i++)
         {
             Panel4 const &pi = m_Panel4.at(i);
-            if(skip[i] || !pi.isMidPanel()) continue;
-            double sum = 0.0;
-            for(int k : trailing)
-            {
-                Panel4 const &pk = m_Panel4.at(k);
-                sum += (legs(pk, pi.m_CtrlPt, theta) - legs(pk, pi.m_CtrlPt, -theta)).dot(pi.normal()) * mu[k];
-            }
-            product[i] = sum/(2.0*theta);
+            if(m_YawedWakeSkip[i] || !pi.isMidPanel()) continue;
+            product[i] = yawedWakeVelocityDerivative(pi.m_CtrlPt, mu.data(), theta).dot(pi.normal());
         }
     };
     int nThreads = std::max(1, std::min(s_MaxThreads, N));

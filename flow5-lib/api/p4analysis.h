@@ -99,6 +99,9 @@ class FL5LIB_EXPORT P4Analysis : public PanelAnalysis
                              std::vector<Vector3d> *panelMoment=nullptr) const;
         bool yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product) override;
         int yawedWakeRowsKept() const {return m_nYawedWakeRowsKept;}
+        void makeYawedWakeSkip();
+        Vector3d trailingLegsVelocity(Panel4 const &pk, Vector3d const &C, double theta) const;
+        Vector3d yawedWakeVelocityDerivative(Vector3d const &C, double const *mu, double theta) const;
 
         void makeMu(int qrhs) override;
 
@@ -168,7 +171,9 @@ class FL5LIB_EXPORT P4Analysis : public PanelAnalysis
         std::vector<Panel4> m_RefWakePanel4;      /**< a copy of the reference wake node array if wake needs to be reset */
         std::vector<Vector3d> m_WakeNode;	      /**< the current working wake node array */
         std::vector<Vector3d> m_RefWakeNode;      /**< a copy of the reference wake node array if the flat wake geometry needs to be restored */
-        int m_nYawedWakeRowsKept = 0;             /**< the panels yawedWakeProduct() left out (they keep the unyawed wake), set by it */
+        int m_nYawedWakeRowsKept = 0;             /**< the panels makeYawedWakeSkip() leaves on the unyawed wake, set by it */
+        std::vector<char> m_YawedWakeSkip;        /**< per panel, 1 where the panel keeps the unyawed wake in the sideslip derivatives (another wing's panels within half a reference chord of a trailing panel's sheet), set by makeYawedWakeSkip() */
+        std::vector<int> m_YawedWakeTrailing;     /**< the trailing mid panels, whose horseshoes' legs the sideslip yaws, set by makeYawedWakeSkip() */
 };
 
 
