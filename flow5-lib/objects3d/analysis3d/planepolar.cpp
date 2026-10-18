@@ -1568,12 +1568,15 @@ void PlanePolar::recalcExtraDrag()
 
     for(int i=0; i<dataSize(); i++)
     {
-        m_AF[i].setExtraDrag(staticdrag);
+        double extradrag = staticdrag;
         if(m_bAVLDrag)
         {
             double CDv = AVLDrag(m_AF[i].CL());
-            m_AF[i].addExtraDrag(CDv * m_RefArea);
+            extradrag += CDv * m_RefArea;
         }
+        // the extra drag's vector along the wind is part of Fv (PlaneTask::computePlane()): replace it there too
+        m_AF[i].addFv(m_AF[i].CFWind().Idir() * (extradrag - m_AF[i].extraDrag()));
+        m_AF[i].setExtraDrag(extradrag);
     }
 }
 

@@ -1525,10 +1525,15 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
     m_AF.setFff(Force);          // N/q, body axes
     m_AF.setMi(Mi);
 
-    // add all extra drag
+    // The extra drag D = sum(area*coef) (+ the AVL-type CDv(CL)*S), N/q, is a force along the onset wind applied at the CoG, so it has no
+    // moment. As a vector it is windD*D: in a sideslip its body-y component is D*windD.y = -D*sin(beta), a side force as the strips' drag
+    // in Fv has one. It goes into Fv, the resultant of the forces that are not pressure forces, whose moment about the CoG stays Mv.
+    // Limit: the stability derivatives are the potential solution's alone (PanelAnalysis::computeTranslationDerivatives()), without this
+    // drag as without the profile drag; a constant-coefficient drag along the wind at the CoG would add CYb = CZa = -CD_extra, CXu = -2 CD_extra.
     if(m_pPlPolar && m_pPlPolar->hasExtraDrag())
     {
         m_AF.setExtraDrag(m_pPlPolar->extraDragTotal(m_AF.CL()));
+        m_AF.addFv(windD*m_AF.extraDrag());                              // N/q
     }
 
     Vector3d M0;
