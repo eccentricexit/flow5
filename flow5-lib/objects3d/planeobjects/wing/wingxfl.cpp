@@ -194,7 +194,7 @@ void WingXfl::computeGeometry()
 
 /**
  * Makes the wing's triangle mesh, surface by surface (Surface::makeTriPanels()).
- * @param bCentredCells true: each quad cell of the strips is split into four triangles about its centre node instead of two along a diagonal (uav#200).
+ * @param bCentredCells true: each quad cell of the strips is split into four triangles about its centre node instead of two along a diagonal.
  */
 int WingXfl::makeTriPanels(int ip3start, int indStart, bool bThickSurfaces, bool bCentredCells)
 {

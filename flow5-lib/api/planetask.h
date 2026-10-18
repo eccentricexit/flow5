@@ -149,7 +149,7 @@ class FL5LIB_EXPORT PlaneTask : public Task3d
         std::vector<T8Opp> m_T8Opps;
         bool m_bRatePoint = false;          /**< true while a point with body rates or, on thin triangle methods, with sideslip is computed: computePlane() then adds m_dForceRate and m_dMomentRate */
         std::vector<double> m_slipSol;      /**< the doublet solution of a point without rates but with sideslip, with the yawed wake's change (unit speed) */
-        Vector3d m_dForceRate;              /**< the change of the far-field force (N/q, body axes) that the sideslip model of the derivatives (uav#79) makes to a rotating point with sideslip */
+        Vector3d m_dForceRate;              /**< the change of the far-field force (N/q, body axes) that the sideslip model of the derivatives makes to a rotating point with sideslip */
         Vector3d m_dMomentRate;             /**< the same for the moment about the CoG (N.m/q) */
 
         std::vector<SpanDistribs> m_SpanDistFF; /**< the array of span distributions of the wings */

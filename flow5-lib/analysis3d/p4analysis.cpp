@@ -1008,7 +1008,7 @@ void P4Analysis::VLMGetVortexInfluence(Panel4 const &p4, Vector3d const &C, doub
 * Calculates the forces using a far-field method.
 * Calculates the moments by a near field method, i.e. direct summation on the panels.
 *
-* VLM2, stability and control derivatives (m_bFarField; uav#81): the on-body moment of the vortices below crosses each bound vortex with
+* VLM2, stability and control derivatives (m_bFarField): the on-body moment of the vortices below crosses each bound vortex with
 * the unperturbed wind direction, so a rotation, a control or a sideslip enters it only through the circulation: Cnp, Cnr and the
 * aileron's yaw read about 0, and the side force of the strips lumped at their trailing edges has the wrong sign in a roll where the
 * trailing edge is swept differently from the leading edge. With m_bFarField, m_MomentFF is instead the moment of the near-field load of
@@ -1022,16 +1022,16 @@ void P4Analysis::VLMGetVortexInfluence(Panel4 const &p4, Vector3d const &C, doub
 * 2. The control derivatives' moments (PlaneTask::computeControlDerivatives() takes m_MomentFF for VLM2): an aileron's yaw is the
 *    difference of the induced drag of the two wings, which only the near-field load places. Their forces stay the far-field ones: with a
 *    uniform onset that is exact in total by momentum (AVL's near-field and Trefftz-plane forces agree there).
-* 3. The sideslip derivatives (m_bSideslipVorticity; uav#79, uav#188): the wake yawed with the free stream in the circulation
+* 3. The sideslip derivatives (m_bSideslipVorticity): the wake yawed with the free stream in the circulation
 *    (yawedWakeProduct()), the far-field side force with its Trefftz plane perpendicular to that wake (m_bSideslipFarField), and in
 *    m_MomentFF the near-field load of the bound vortices in the velocity the yawed lattice induces at them, plus the free-stream force of
-*    the rings' chordwise legs on the sheet (boundVortexLoad()). Until uav#188 the bound vortices took the unyawed lattice's velocity, kept
+*    the rings' chordwise legs on the sheet (boundVortexLoad()). Before the yawed wake's velocity was taken on the bound vortices, they took the unyawed lattice's velocity, kept
 *    because with the yawed legs a wing's Cnb over NACA TN 1581 eq 21 grew with the aspect ratio (1.8 at A 10, 2.1 at A 40 unswept) where it
 *    was expected to tend to 1. It need not: a trailing leg leaving a lifting line at an angle induces a sidewash whose span integral is
 *    log(span/chord), so the thin-wing Cnb has no chord-free limit and that formula (strip theory, Toll and Queijo 1948) is not one. An
 *    independent lattice (flow5tools/dev/lattice.py) gives the same values. Limit: the chordwise legs' own induced load (boundVortexLoad()).
 * 4. The moment of every other state (the polar's Cm through PlaneTask::computePlane(), the u and w derivatives, so Cma and the neutral
-*    point; uav#187) is the near-field load's too. Basis: the on-body moment crosses each bound vortex with the free-stream direction only,
+*    point) is the near-field load's too. Basis: the on-body moment crosses each bound vortex with the free-stream direction only,
 *    which leaves out the force of the induced velocity on it, the induced drag and its lever: a wing with dihedral or sweep has one in
 *    pitch (AVL's Cm is the near-field load's, SFFORC). Then Cm, Cma and Cm_de share one model. The forces stay the far-field ones
 *    (rule 2's momentum argument) except in rotation.
@@ -1235,14 +1235,14 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
 
 
 /**
- * The near-field Kutta-Joukowski load of the VLM2 lattice (uav#81), as AVL's (Drela and Youngren, AVL 3.52, aero.f SFFORC): on each bound
+ * The near-field Kutta-Joukowski load of the VLM2 lattice, as AVL's (Drela and Youngren, AVL 3.52, aero.f SFFORC): on each bound
  * vortex, the segment m_VA-m_VB at a panel's quarter-chord line, the circulation Gamma = Mu[p] - Mu[p+1] (the panel's ring less the ring
  * upstream, whose aft leg lies on the same line; the leading panel's alone) and the force rho Gamma (V + v) x l, with V the onset at the
  * segment's midpoint (VInf of the panel and the rotation m_Omega) and v the velocity the lattice induces there, the segment's own being zero.
  * The chordwise legs and the trailing legs carry no force (AVL's default, LTRFORCE), except in the sideslip derivatives
  * (m_bSideslipVorticity): there the free-stream force of each ring's chordwise legs on the sheet, up to the trailing edge, is added at their
- * midpoints, the vorticity load of the triangle methods (uav#79), and the velocity at the bound vortices carries the yaw of the trailing legs
- * with the free stream to first order (uav#188: yawedWakeVelocityDerivative() times the state's yaw, the linearisation of yawedWakeProduct()
+ * midpoints, the vorticity load of the triangle methods, and the velocity at the bound vortices carries the yaw of the trailing legs
+ * with the free stream to first order (yawedWakeVelocityDerivative() times the state's yaw, the linearisation of yawedWakeProduct()
  * that the circulation already has; the panels makeYawedWakeSkip() leaves on the unyawed wake, a fin in the wing's wake, take the unyawed
  * velocity, as their rows do in the circulation). Each leg is loaded with the velocity the lattice resolves at it: at a bound vortex the
  * downwash, which the lattice solves for; at a chordwise leg the free stream alone, since the sheet's in-plane velocity there is zero on a

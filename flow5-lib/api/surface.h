@@ -250,7 +250,7 @@ class FL5LIB_EXPORT Surface
         bool isCellCentreNode(int iNode) const {return iNode>=m_FirstCentreNode && iNode<m_FirstCentreNode+m_nCentreNodes;}
         void recentreCellNodes(std::vector<Panel3> const &panel3, std::vector<Node> &node) const;
 
-        /** The triangles of a quad cell of the surface's strips, as the last makeTriPanels() built them (uav#200): 2, the cell split along one
+        /** The triangles of a quad cell of the surface's strips, as the last makeTriPanels() built them: 2, the cell split along one
          *  diagonal (the default), or 4, the cell split about a centre node, the mean of its four corners, into its downstream triangle, its side A and
          *  side B triangles and its upstream triangle, in that order along the strip. The tip patches keep two triangles a cell. */
         int nCellTriangles() const {return m_nCellTriangles;}
