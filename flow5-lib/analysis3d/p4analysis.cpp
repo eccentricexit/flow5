@@ -1239,16 +1239,34 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
  * vortex, the segment m_VA-m_VB at a panel's quarter-chord line, the circulation Gamma = Mu[p] - Mu[p+1] (the panel's ring less the ring
  * upstream, whose aft leg lies on the same line; the leading panel's alone) and the force rho Gamma (V + v) x l, with V the onset at the
  * segment's midpoint (VInf of the panel and the rotation m_Omega) and v the velocity the lattice induces there, the segment's own being zero.
- * The chordwise legs and the trailing legs carry no force (AVL's default, LTRFORCE), except in the sideslip derivatives
- * (m_bSideslipVorticity): there the free-stream force of each ring's chordwise legs on the sheet, up to the trailing edge, is added at their
- * midpoints, the vorticity load of the triangle methods, and the velocity at the bound vortices carries the yaw of the trailing legs
- * with the free stream to first order (yawedWakeVelocityDerivative() times the state's yaw, the linearisation of yawedWakeProduct()
- * that the circulation already has; the panels makeYawedWakeSkip() leaves on the unyawed wake, a fin in the wing's wake, take the unyawed
- * velocity, as their rows do in the circulation). Each leg is loaded with the velocity the lattice resolves at it: at a bound vortex the
- * downwash, which the lattice solves for; at a chordwise leg the free stream alone, since the sheet's in-plane velocity there is zero on a
- * planar sheet and unresolved on a twisted one (loaded with it, the swept twisted flying-wing fixture's Clb read -0.0066 at 13 chordwise
- * panels against -0.0479 at 52, where the free-stream load reads -0.0478 at every count), and the wake's velocity there is a term of 1 to 7
- * percent of a wing's own Cnb that converges only logarithmically (an independent lattice, flow5tools/dev/lattice.py).
+ * The chordwise legs and the trailing legs carry no force in the static state (AVL's default, LTRFORCE: on a planar sheet their in-plane load
+ * is symmetric and the sheet's in-plane velocity is zero inboard of the tips). They are loaded in two cases:
+ * - the sideslip derivatives (m_bSideslipVorticity): the free-stream force of each ring's chordwise legs on the sheet, up to the trailing edge,
+ *   at their midpoints, the vorticity load of the triangle methods, and the velocity at the bound vortices carries the yaw of the trailing legs
+ *   with the free stream to first order (yawedWakeVelocityDerivative() times the state's yaw, the linearisation of yawedWakeProduct() that the
+ *   circulation already has; the panels makeYawedWakeSkip() leaves on the unyawed wake, a fin in the wing's wake, take the unyawed velocity, as
+ *   their rows do in the circulation). The chordwise legs take the free stream alone there: the yawed wake's velocity at them is a term of 1 to 7
+ *   percent of a wing's own Cnb that converges only logarithmically with the lattice, and on a twisted sheet their induced load is unresolved at
+ *   practical counts (the swept twisted flying-wing fixture's Clb read -0.0066 at 13 chordwise panels against -0.0479 at 52, where the
+ *   free-stream load reads -0.0478 at every count).
+ * - the roll rate (m_bRotationSuction and m_bRollRate, the p derivatives): each chordwise leg takes the onset velocity at its midpoint, the free
+ *   stream with the rotation. Its in-plane part is the side-edge (tip) suction of thin-wing theory: on a planar sheet the in-plane load of the chordwise
+ *   vorticity under the onset's normal velocity sums, with the sheet's edges, to zero (Hancock, ARC R&M 3758 Part I, eq 37), so what the interior
+ *   carries is the edge force, outboard at the tips, and in a roll the down-going tip's is the larger, which on a swept wing acts behind the CoG.
+ *   Without it the yaw due to roll rate is the strip theory's (Toll and Queijo, NACA TN 1581), 0.14 to 0.7 of the rolling-flow measurements on
+ *   swept wings (Goodman and Fisher, NACA TN 1835); with it the potential-flow value, above those measurements by the part of the tip suction a
+ *   real tip does not realise (about a third at low lift, more as the tips separate: Garner, ARC R&M 3758 Part II; TN 1835 reads the unswept
+ *   wings' side force at two thirds of the theory). Its normal part is the yaw rate's sidewash on the chordwise vorticity, a force worth 0.07 to
+ *   0.3 of CL in Clr/CL that the bound legs alone miss. Measured on an independent lattice: on unswept tips this load is the side-edge force of
+ *   lifting-surface theory within 1 percent (CYp/CL 0.794 and 0.386 against Garner's 0.786 and 0.380 at A 2 and 4, Cnp/CL -0.160 against -0.157);
+ *   on a swept tip the induced velocity adds a part that is left out here, since it converges only logarithmically with the chordwise count and
+ *   is unresolved on a twisted sheet at practical counts (the swept twisted flying-wing fixture's Clp read -0.70 at 13 chordwise panels against
+ *   -0.53 at 26 and 52 with it, -0.53 at every count without): near the root, so a quarter of the side force and a few percent of the yaw moment
+ *   on a 45 deg wing (an explicit extraction of the edge singularity, Lamar NASA TR R-428, Lan NASA CR-145251, would carry it). In the yaw rate
+ *   the same load is not applied, a measured limit and not a derivation: there it reads the yaw damping of the opposite sign to the curved-flow
+ *   measurements on swept wings (Cnr at the measured CL +0.012 against -0.080 on the A 1.34, 45 deg wing, where the bound legs alone read -0.083)
+ *   and doubles the roll due to yaw on the low-aspect-ratio wings (Clr/CL 0.49 against 0.16 at A 1.34 unswept), while the bound legs alone are
+ *   within the measurements' spread on both. The pitch rate is left as the bound legs give it.
  * Thin panels only (VLM2); fuse panels are left out.
  * Force (N) and Moment (N.m, about CoG); panelMoment, when given, each panel's share of the moment (N.m, about CoG, zero off the mid-surface).
  */
@@ -1279,17 +1297,24 @@ void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::v
             F[p] = (v * l) * G;
             M[p] = (mid - CoG) * F[p];
 
-            if(m_bSideslipVorticity)
+            if(m_bSideslipVorticity || (m_bRotationSuction && m_bRollRate))
             {
-                // the ring's two chordwise legs, from its bound vortex to the next one downstream, or to the trailing edge, with the free stream
+                // the ring's two chordwise legs, from its bound vortex to the next one downstream, or to the trailing edge, with the onset velocity
+                // at their midpoints: the free stream in the sideslip derivatives, with the rotation in the roll rate (the tip suction, see above)
                 Vector3d TA, TB;
                 if(p4.isTrailing()) {TA = p4.TA();                  TB = p4.TB();}
                 else                {TA = m_Panel4.at(p-1).m_VA;    TB = m_Panel4.at(p-1).m_VB;}
-                Vector3d const &V = VInf.at(p);
-                Vector3d fR = (V * (TB - p4.m_VB)) * Mu4[p];
-                Vector3d fL = (V * (p4.m_VA - TA)) * Mu4[p];
+                Vector3d midR = (p4.m_VB + TB)*0.5, midL = (p4.m_VA + TA)*0.5;
+                Vector3d vR = VInf.at(p), vL = VInf.at(p);
+                if(m_bRotationSuction && m_bRollRate)
+                {
+                    vR += (midR - p4.CoG()) * m_Omega;
+                    vL += (midL - p4.CoG()) * m_Omega;
+                }
+                Vector3d fR = (vR * (TB - p4.m_VB)) * Mu4[p];
+                Vector3d fL = (vL * (p4.m_VA - TA)) * Mu4[p];
                 F[p] += fR + fL;
-                M[p] += ((p4.m_VB + TB)*0.5 - CoG) * fR + ((p4.m_VA + TA)*0.5 - CoG) * fL;
+                M[p] += (midR - CoG) * fR + (midL - CoG) * fL;
             }
         }
     };
