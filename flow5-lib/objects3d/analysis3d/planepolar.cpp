@@ -366,7 +366,7 @@ void PlanePolar::addPlaneOpPointData(PlaneOpp const *pPOpp)
                     {
                         if (fabs(pPOpp->m_QInf - m_QInfinite.at(i)) < d)
                         {
-                            // the same state only if the body rates are the same too (uav: a straight and a rotating point at one
+                            // the same state only if the body rates are the same too (a straight and a rotating point at one
                             // alpha, beta and speed are two points, as Objects3d::insertPlaneOpp keeps them); sort by the rates (p, q, r)
                             Vector3d const ro = i<int(m_Rates.size()) ? m_Rates.at(i) : Vector3d();
                             double const rn[3] = {pPOpp->rates().x, pPOpp->rates().y, pPOpp->rates().z};

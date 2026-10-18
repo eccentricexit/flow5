@@ -1324,7 +1324,7 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
     }
 
 
-    // VLM2: each wing's moment is that of the near-field load of the lattice (P4Analysis::forces(), rule 4, uav#187), the model of its
+    // VLM2: each wing's moment is that of the near-field load of the lattice (P4Analysis::forces(), rule 4), the model of its
     // derivatives; the onset is the one the circulations were solved with (the control polar's turned mesh: the body x axis)
     std::vector<Vector3d> nearFieldMoment;
     if(pPlaneXfl && m_pPlPolar->isVLM2() && m_pP4A)
@@ -2378,7 +2378,7 @@ bool PlaneTask::checkRatePoints()
 
 
 /**
- * Whether the points with sideslip follow the sideslip model of the derivatives (uav#79, flow5#23, applySideslipModel()): the triangle methods, thin or thick (uav#80), on planes
+ * Whether the points with sideslip follow the sideslip model of the derivatives (pull request #23, applySideslipModel()): the triangle methods, thin or thick, on planes
  * of wings without a fuselage, ground effect or vorton wake. VLM and the rest keep the older model of the polar.
  */
 bool PlaneTask::sideslipModelApplies() const
@@ -2389,7 +2389,7 @@ bool PlaneTask::sideslipModelApplies() const
 
 
 /**
- * The sideslip model of the derivatives (uav#79) for a point with sideslip beta at speed Q, with or without rates: the wake leaves along the free stream, to first order in
+ * The sideslip model of the derivatives for a point with sideslip beta at speed Q, with or without rates: the wake leaves along the free stream, to first order in
  * its yaw theta (the lateral part of the flow direction): sol, the doublet solution of the point, takes theta times the first-order change of the circulation. The far-field
  * force and moment of the plain model (the Trefftz plane perpendicular to the body x axis, the free-stream force of the sheet at the strips' quarter points) change by
  * (B-D) - (A-E), with E (no sideslip) and A (sideslip, with the yawed wake's circulation) the states of the plain model and D and B the same two with the model of the
@@ -2426,7 +2426,7 @@ bool PlaneTask::applySideslipModel(double alpha, double beta, double Q, Vector3d
     pPA->stateFarField(solBeta,  fieldB, alpha, CoG, bFuseMi, true,  FB, MB);         // sideslip model, sideslip
     m_dForceRate  = ((FB-FD) - (FA-FE)) * (1.0/qDyn);     // N/q
     m_dMomentRate = ((MB-MD) - (MA-ME)) * (1.0/qDyn);     // N.m/q
-    // Thick surfaces (uav#80): the point's moment is the on-body pressure moment, without a leading-edge force, so the plain model's change it carries is that of the
+    // Thick surfaces: the point's moment is the on-body pressure moment, without a leading-edge force, so the plain model's change it carries is that of the
     // pressures (OA-OE), not that of the strips (MA-ME); with it the point's moment changes by the sideslip model's (MB-MD), as the derivatives
     if(pPA->hasThickSurfaces()) m_dMomentRate = ((MB-MD) - (OA-OE)) * (1.0/qDyn);     // N.m/q
     return true;
@@ -2447,7 +2447,7 @@ bool PlaneTask::applySideslipModel(double alpha, double beta, double Q, Vector3d
  * inducedForce() do the same, so a point with small rates differs from the point without by the rate derivatives times the rates. The strips' Cl and Re and the viscous
  * drag use that onset: its speed (SpanDistribs::m_VOnset), as AVL does.
  *
- * (A point with sideslip follows applySideslipModel(), shared with the points without rates.) A point with sideslip is the sum of the parts of the derivatives: the sideslip part follows the model of the sideslip derivatives (uav#79: the wake leaves along the free
+ * (A point with sideslip follows applySideslipModel(), shared with the points without rates.) A point with sideslip is the sum of the parts of the derivatives: the sideslip part follows the model of the sideslip derivatives (the wake leaves along the free
  * stream, to first order; the Trefftz plane of the far field is perpendicular to it; the free-stream force of the sheet is on its vorticity), the rate part the lumped
  * rule of the rate derivatives. With the states E (no sideslip, no rates) and A (sideslip, no rates) of the plain model and D and B of the sideslip model, the far-field
  * force and moment of the plain model at the point change by (B-D) - (A-E), which computePlane() adds. For a point without sideslip the change is zero.
@@ -2711,7 +2711,7 @@ void PlaneTask::computeControlDerivatives(double t7ctrl, double alphaeq, double 
         SD.Xde[ie] = (ForceFF - m_Force0FF).dot(is) / DeltaCtrl;
         SD.Yde[ie] = (Force   - m_Force0  ).dot(js) / DeltaCtrl;
         SD.Zde[ie] = (ForceFF - m_Force0FF).dot(ks) / DeltaCtrl;
-        // VLM2: the moment of the near-field load of the lattice (P4Analysis::forces(), rule 2, uav#81): its on-body moment crosses the bound
+        // VLM2: the moment of the near-field load of the lattice (P4Analysis::forces(), rule 2): its on-body moment crosses the bound
         // vortices with the unperturbed wind, so that a control's yaw, the difference of the induced drag of the two sides, was about 0
         Vector3d const &M  = m_pPlPolar->isVLM2() ? m_pPA->farFieldMoment()          : Moment;
         Vector3d const &M0 = m_pPlPolar->isVLM2() ? m_pPA->referenceFarFieldMoment() : m_Moment0;

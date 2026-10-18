@@ -562,7 +562,7 @@ void Panel3::translate(double tx, double ty, double tz)
 
 /**
  * log(p + rho), rho = sqrt(p^2 + d). For negative p much larger than sqrt(d) (a long edge, a field point close to its line) p + rho
- * cancels to rounding noise, or to zero, whose logarithm is -infinity: the NaN that collapsed the TRILINEAR solution (uav#70).
+ * cancels to rounding noise, or to zero, whose logarithm is -infinity: the NaN that collapsed the TRILINEAR solution.
  * Then p + rho = d/(rho - p) exactly.
  */
 static inline double logPlusRho(double p, double rho, double d)
@@ -1559,7 +1559,7 @@ void Panel3::doubletN4023Velocity(Vector3d const &C, bool , Vector3d &V, double 
         {
             // the point is within the core radius of the side: no contribution.
             // |a x s| is the distance times the side's length: compared with the core radius alone it dropped a long side
-            // up to 1e-6/length from it, 0.3 mm for a 3.5 mm side, the collocation points of sliver triangles included (uav#200)
+            // up to 1e-6/length from it, 0.3 mm for a 3.5 mm side, the collocation points of sliver triangles included
         }
         else
         {

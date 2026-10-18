@@ -1034,7 +1034,7 @@ void Surface::setTwist(bool bQuarterChord)
 /**
  * Makes the surface's triangles and nodes, appended to panel3list and nodes.
  * @param bCentredCells false: each quad cell of the strips is split along one diagonal into two triangles (flow5's mesh);
- * true: each cell is split into four triangles about a centre node (uav#200), so that the strip's trailing triangle is centred on its strip.
+ * true: each cell is split into four triangles about a centre node, so that the strip's trailing triangle is centred on its strip.
  * The layout is kept in nCellTriangles() and in each strip panel (Panel3::nCellTriangles()), where the strip walks read it.
  */
 void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &nodes, int ip3start, bool bThickSurfaces, int nTipStrips, int &leftnodeidx, int &rightnodeidx,
@@ -1112,7 +1112,7 @@ void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &
     };
     auto isFlapCell = [this](int l) {return l<m_NXFlap || l>2*m_NXPanels-m_NXFlap-1;};
 
-    // with centred cells, each cell's centre node, the mean of its four corners, made after all the other nodes so as not to move their indexes (uav#200)
+    // with centred cells, each cell's centre node, the mean of its four corners, made after all the other nodes so as not to move their indexes
     m_FirstCentreNode = int(nodes.size());
     m_nCentreNodes = bCentredCells ? m_NYPanels*nCells : 0;
     for(int k=0; k<m_NYPanels && bCentredCells; k++)
@@ -1284,7 +1284,7 @@ void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &
             // 1 _____________         _____________
             //   1           2         1           2
             //
-            // T = 4, centred cells (uav#200): the cell is split about its centre node C, p3[1] the triangle on side A, p3[2] on side B.
+            // T = 4, centred cells: the cell is split about its centre node C, p3[1] the triangle on side A, p3[2] on side B.
             // The downstream and upstream triangles are D and U with the vertex off their outer edge replaced by C: same vertex roles,
             // same orientation. With a single diagonal the trailing triangle's centroid sits a third of the strip from one side: a constant
             // doublet (TRIUNIFORM) samples the onset off the strip's centre with the same sign in every strip; here it is on the strip's centre line.
@@ -1570,7 +1570,7 @@ void Surface::makeTriPanels(std::vector<Panel3> &panel3list, std::vector<Node> &
 
 
 /**
- * With centred cells (nCellTriangles() 4, uav#200), moves each cell's centre node back to the mean of the cell's four corners, after corners have
+ * With centred cells (nCellTriangles() 4), moves each cell's centre node back to the mean of the cell's four corners, after corners have
  * moved otherwise than with their cell: PlaneXfl::sealFlapEnds() warps the end strips of the flaps it seals. Does nothing on a mesh of two triangles a cell.
  * The cells are read along the strips' chains of panels from their trailing panels, four triangles a cell: the centre is the one node that the cell's downstream and upstream triangles share, the corners are their other nodes.
  * A strip whose chain is not made of whole cells (a null triangle) is left as it is.

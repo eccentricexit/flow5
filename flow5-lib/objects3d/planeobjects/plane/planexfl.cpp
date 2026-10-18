@@ -934,7 +934,7 @@ void PlaneXfl::swapIndexes(int k, int l)
 
 /**
  * Builds the surfaces and the meshes.
- * @param bCentredCells the triangle mesh splits each quad cell of the wings' strips into four triangles about its centre node (uav#200),
+ * @param bCentredCells the triangle mesh splits each quad cell of the wings' strips into four triangles about its centre node,
  * instead of two along a diagonal; see Surface::makeTriPanels()
  */
 void PlaneXfl::makePlane(bool bThickSurfaces, bool bIgnoreFusePanels, bool bMakeTriMesh, bool bCentredCells)
@@ -1980,7 +1980,7 @@ int PlaneXfl::sealFlapEnds(std::vector<Panel3> const &panel3, std::vector<Node> 
                     }
                 }
             }
-            // the end strips are warped, not turned: their cells' centre nodes go back to the mean of their corners (uav#200)
+            // the end strips are warped, not turned: their cells' centre nodes go back to the mean of their corners
             sa.recentreCellNodes(panel3, node);
             sb.recentreCellNodes(panel3, node);
         }

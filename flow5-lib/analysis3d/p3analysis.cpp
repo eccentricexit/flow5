@@ -1200,7 +1200,7 @@ static double ringOrientation(Panel3 const &p3, Vector3d const &T)
 
 
 /**
- * The free-stream Kutta-Joukowski force of the thin sheets' vorticity, at the positions of the vorticity (uav#79).
+ * The free-stream Kutta-Joukowski force of the thin sheets' vorticity, at the positions of the vorticity.
  *
  * A doublet density mu on a sheet is the vorticity n x grad(mu) over the triangles plus, along every edge, the vortex line of circulation (jump of mu), and
  * along the outer edges the line of circulation mu itself. For the nodal densities Mu3 (linear on each triangle, 3 values per panel) each triangle is then a
@@ -1267,7 +1267,7 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
 
 /**
  * The panels of the thick strip whose bottom trailing panel is i3, in the order of the iPU links (bottom surface from the trailing edge, leading edge, top surface
- * to the trailing edge), its number of chordwise cells a side NX and the triangles of a cell T (Panel3::nCellTriangles(): 2, or 4 with centred cells, uav#200):
+ * to the trailing edge), its number of chordwise cells a side NX and the triangles of a cell T (Panel3::nCellTriangles(): 2, or 4 with centred cells):
  * cell c (panels T c to T c + T - 1) of the bottom faces cell 2 NX - 1 - c of the top. False if the chain is not 2 NX cells of T triangles, the first NX on the bottom.
  */
 bool P3Analysis::thickStripChain(int i3, std::vector<int> &chain, int &NX, int &T) const
@@ -1296,7 +1296,7 @@ bool P3Analysis::thickStripChain(int i3, std::vector<int> &chain, int &NX, int &
  * per panel), projected on the cell's mean-surface normal, the difference of the top's and the bottom's area-weighted normals. On a thin strip the panel
  * force is that of the pressure jump across the sheet, normal to it; on a thick strip the projection keeps that part, the jump between facing points, and leaves
  * out the in-plane part of the pressures: the leading-edge suction, which the rotating states direct as on a thin strip (stripSuctionCorrection()), and the
- * thickness' own pressures (uav#80). False if the strip's chain is not regular (the caller then takes the whole strip's pressure force).
+ * thickness' own pressures. False if the strip's chain is not regular (the caller then takes the whole strip's pressure force).
  */
 bool P3Analysis::thickStripLiftPressureForce(int i3, std::vector<Vector3d> const &panelForce, Vector3d &FP) const
 {
@@ -1323,7 +1323,7 @@ bool P3Analysis::thickStripLiftPressureForce(int i3, std::vector<Vector3d> const
 
 
 /**
- * The unit normal n of a strip's chord plane (uav#198): the plane of the chord, from the trailing edge's midpoint of the strip's trailing panel pTrailing to its
+ * The unit normal n of a strip's chord plane: the plane of the chord, from the trailing edge's midpoint of the strip's trailing panel pTrailing to its
  * quarter-chord point QP, and of the span along that trailing edge. Its sign is not set: m_MomentLift takes it twice. False for a degenerate strip.
  */
 bool P3Analysis::stripChordNormal(Panel3 const &pTrailing, Vector3d const &QP, Vector3d &n) const
@@ -1338,7 +1338,7 @@ bool P3Analysis::stripChordNormal(Panel3 const &pTrailing, Vector3d const &QP, V
 
 
 /**
- * The moment about QP (N.m/rho) of a thick strip's load normal to its chord plane, cell by cell (m_MomentLift, uav#198): per chordwise cell, the panel forces
+ * The moment about QP (N.m/rho) of a thick strip's load normal to its chord plane, cell by cell (m_MomentLift): per chordwise cell, the panel forces
  * of the bottom cell and of the top cell facing it, panelForce (N/rho per panel), projected on the normal of the strip's chord plane and placed at the
  * area-weighted centre of the cells' panels (stripChordNormal()); the in-plane pressures, the leading-edge suction and the thickness', stay at QP
  * (P3Analysis::forces(), rule 2).
@@ -1377,7 +1377,7 @@ bool P3Analysis::thickStripLiftMoment(int i3, std::vector<Vector3d> const &panel
 
 
 /**
- * The free-stream Kutta-Joukowski force of the lifting vorticity of the thick strips, on their mean surface (uav#80).
+ * The free-stream Kutta-Joukowski force of the lifting vorticity of the thick strips, on their mean surface.
  *
  * A thick strip carries the doublet density mu on its bottom and top surfaces. Its vorticity is the lift's and the thickness': the part of mu common to both
  * surfaces, with the sources, makes the thickness, which the free stream alone does not load (on a closed surface the force on that vorticity is that of the
@@ -1386,7 +1386,7 @@ bool P3Analysis::thickStripLiftMoment(int i3, std::vector<Vector3d> const &panel
  * Low-Speed Aerodynamics, 2nd ed., 2001, sec. 4.4 and 12.1). At the trailing edge it is the strip's circulation, at the leading edge 0.
  *
  * Each strip is walked from its bottom trailing panel along the iPU links (bottom surface, leading edge, top surface); its chordwise stations are the pairs of nodes
- * that two consecutive cells share, the station s of the bottom facing the station 2 NX - s of the top, and the centre node of each cell (uav#200) faces the centre
+ * that two consecutive cells share, the station s of the bottom facing the station 2 NX - s of the top, and the centre node of each cell faces the centre
  * of the top cell over it. The mean surface is the bottom's triangles with each node
  * moved to the midpoint of itself and its facing node, its nodal density mu_top - mu_bottom (each node's value the mean of the strip's panels that hold it);
  * its load is that of sheetVorticityLoad() on a thin sheet: per triangle a ring of circulation 4 pi mu along its edges, closed by the area vorticity, the trailing
@@ -1616,10 +1616,10 @@ void P3Analysis::meanSheetVorticityLoad(double const *Mu3, std::vector<Vector3d>
 * force-free under a lateral perturbation (issue #7).
 *
 * In the sideslip derivatives m_MomentFF puts the free-stream part of the strips' forces on the vorticity of the sheet instead of the quarter points
-* (sheetVorticityLoad(), thin surfaces; uav#79): the strips' force V x Gamma l_TE is right as a total (Stokes), but lumps at the quarter point the chordwise
+* (sheetVorticityLoad(), thin surfaces): the strips' force V x Gamma l_TE is right as a total (Stokes), but lumps at the quarter point the chordwise
 * vorticity d(mu)/dy between the strips, whose force in a sideslip carries the rolling and yawing moments. Thick strips put it on their lifting vorticity,
-* the jump mu_top - mu_bottom on their mean surface (meanSheetVorticityLoad(), uav#80). The Trefftz-plane part of the strips' forces, their induced drag,
-* is in m_ForceFF but not in m_MomentFF (uav#188): a wing's induced yaw in sideslip is the moment of the induced drag's distribution, which the far field does
+* the jump mu_top - mu_bottom on their mean surface (meanSheetVorticityLoad()). The Trefftz-plane part of the strips' forces, their induced drag,
+* is in m_ForceFF but not in m_MomentFF: a wing's induced yaw in sideslip is the moment of the induced drag's distribution, which the far field does
 * not give (Munk: the total is fixed, the parts depend on the stagger) and the near-field Kutta-Joukowski load of a doublet sheet does not converge to (its
 * edge lines at the leading edge recover 78 percent of the suction at 13 and 26 chordwise cells). Until then it sat at the strips' quarter points,
 * perpendicular to the trailing edge: a convention, which read 1.2 to 1.3 times less than the lattice's near-field load on swept wings. The triangle methods
@@ -1668,7 +1668,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     // The far-field velocity of the strips is the one of the polar's induced force (trefftzDrag): the analytic Trefftz plane perpendicular to the wake sheet,
     // from the trailing legs of every strip of every surface for this solution; half of it is the velocity at the bound vortex. It does not depend on the
     // length of the wake.
-    bool bSheetLoad = m_bFarField && m_bSideslipVorticity;   // sideslip derivatives (uav#79; thick surfaces uav#80)
+    bool bSheetLoad = m_bFarField && m_bSideslipVorticity;   // sideslip derivatives
     std::vector<std::pair<int, Vector3d>> thickFreeStream;   // the thick strips' bottom trailing panels and the free-stream parts of their far-field forces (N), with bSheetLoad
 
     Vector3d wakedir(1.0, 0.0, 0.0);
@@ -1726,7 +1726,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                     m_ForceFF += stripforce;
                     Vector3d quarterpoint = stripQuarterPoint(p3);
                     // with bSheetLoad the strip's moment is that of the free-stream force on the sheet's vorticity below; the Trefftz-plane part
-                    // (the strip's induced drag) has no derived place on a doublet sheet and is left out of the moment (uav#188)
+                    // (the strip's induced drag) has no derived place on a doublet sheet and is left out of the moment
                     if(m_bFarField && !bSheetLoad) m_MomentFF += (quarterpoint - CoG) * stripforce;   // N.m
 
                     // walk the strip upstream, to its leading edge
@@ -1794,7 +1794,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 m_ForceFF += stripforce;
                 if(bSheetLoad)
                 {
-                    // as the thin strips: the free-stream part on the mean surface's vorticity below, the Trefftz-plane part left out of the moment (uav#188)
+                    // as the thin strips: the free-stream part on the mean surface's vorticity below, the Trefftz-plane part left out of the moment
                     Vector3d inducedforce = vortex * wash;
                     inducedforce *= GammaStrip * m_pPolar3d->density();     // N
                     thickFreeStream.push_back({i3, stripforce - inducedforce});
@@ -1830,7 +1830,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
         Vector3d sheetForce;
         if(!thickFreeStream.empty())
         {
-            // thick strips: the lifting vorticity on the mean surface (uav#80); a strip whose mesh is not the regular chain of cells keeps its free-stream
+            // thick strips: the lifting vorticity on the mean surface; a strip whose mesh is not the regular chain of cells keeps its free-stream
             // force at its quarter point, as the older model
             std::vector<int> irregular;
             meanSheetVorticityLoad(Mu3, VInf, CoG, sheetForce, m_MomentFF, irregular);
@@ -1928,7 +1928,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             Panel3 const &p3 = m_Panel3.at(stripTP[is]);
             Vector3d FP = stripFP[is] * m_pPolar3d->density();   // N
             Vector3d FPlift;
-            if(!stripThin[is] && thickStripLiftPressureForce(stripTP[is], panelForce, FPlift)) FP = FPlift * m_pPolar3d->density();   // uav#80
+            if(!stripThin[is] && thickStripLiftPressureForce(stripTP[is], panelForce, FPlift)) FP = FPlift * m_pPolar3d->density();   //
             Force += stripSuctionCorrection(p3, stripNF[is], FP);
             Vector3d dF = stripSuctionCorrection(p3, stripFF[is], FP);
             m_ForceFF   += dF;
@@ -1946,13 +1946,13 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
         m_MomentLocal += (stripLE[is] - stripQP[is]) * leforce;   // N.m
     }
 
-    // m_MomentLift (uav#198): each strip's load normal to its chord plane (stripChordNormal()) where it acts, about the quarter-chord point; what lies in
+    // m_MomentLift: each strip's load normal to its chord plane (stripChordNormal()) where it acts, about the quarter-chord point; what lies in
     // that plane stays at the quarter-chord point (rule 2 above). Basis: the far-field strip forces at the quarter-chord points carry no chordwise lever, and
     // a rate whose onset varies along the chord (a yaw rate on a fin, as a pitch rate on a wing) loads the strip aft of it: a fin's Cnr read 0.84 of AVL's,
     // its Cnp 1.08. The normal load is the pressures' part along the normal, at the panels, and on thin strips the part the panels under-integrate near the
     // leading edge, the leading-edge force's, at the leading edge, as in Cm and Mq; thick strips cell by cell (thickStripLiftMoment()). One normal a
     // strip: the in-plane parts are the suction (rule 2), the thickness' pressures, and a cambered panel's own tilt, whose axial force with the triangles'
-    // spanwise offsets inside the strip moved the cambered swept flying wing's Cnp 3 percent (uav#200's mesh, not a lever). The suction's change (rule 1)
+    // spanwise offsets inside the strip moved the cambered swept flying wing's Cnp 3 percent (the centred-cell mesh, not a lever). The suction's change (rule 1)
     // lies along the span, in the plane, and does not move it.
     if(m_bFarField)
     {
@@ -2430,7 +2430,7 @@ void P3Analysis::makeStateCp(std::vector<double> const &sol, std::vector<Vector3
 /**
  * dsol = -A^-1 (dA_wake/dtheta) sol0: the first-order change of the doublet solution of the state sol0 when the wake, which leaves the trailing edges along the body x axis,
  * is yawed by theta (rad, positive towards +y) as it is along a sideslipped free stream: mu(theta) = mu_linear + theta dsol. This is the wake part of the
- * sideslip model of the derivatives (uav#79, computeTranslationDerivatives()). Returns false if the wake's matrix product could not be made.
+ * sideslip model of the derivatives (computeTranslationDerivatives()). Returns false if the wake's matrix product could not be made.
  */
 bool P3Analysis::makeYawedWakeCorrection(std::vector<double> const &sol0, std::vector<double> &dsol)
 {
@@ -2443,7 +2443,7 @@ bool P3Analysis::makeYawedWakeCorrection(std::vector<double> const &sol0, std::v
 /**
  * The far-field force (N) and the moment about the CoG (N.m) of a state, as the derivatives evaluate them: the moment of the far-field strip forces lumped at the strips'
  * quarter-chord points plus the strips' own chordwise loads, which is the pressure moment with the leading-edge force that the panels miss (forces(): Moment).
- * With bSideslipModel the state is evaluated by the sideslip model of the v derivatives (uav#79): the Trefftz plane of the far field is perpendicular to the onset
+ * With bSideslipModel the state is evaluated by the sideslip model of the v derivatives: the Trefftz plane of the far field is perpendicular to the onset
  * flow, whose direction is that of the first panel's, and the free-stream force of the doublet sheet is put on the sheet's vorticity instead of at the quarter points
  * (the chordwise loads stay). pOnBodyMoment, if given, receives the on-body moment of forces() (N.m: the pressures, with the thin strips' leading-edge force), which
  * is the moment of a point of a thick plane (PlaneTask::applySideslipModel()). It sets m_Cp.

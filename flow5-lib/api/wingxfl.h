@@ -154,7 +154,7 @@ class FL5LIB_EXPORT WingXfl : public Part
         bool intersectWing(const Vector3d &O, const Vector3d &U, Vector3d &I, int &idxSurf, double &dist, bool bDirOnly) const;
 
         int makeTriPanels(int ip3start, int indStart, bool bThickSurfaces, bool bCentredCells=false);
-        /** The triangles of a quad cell of the strips in the last triangle mesh: 2, or 4 with centred cells (Surface::makeTriPanels(), uav#200) */
+        /** The triangles of a quad cell of the strips in the last triangle mesh: 2, or 4 with centred cells (Surface::makeTriPanels()) */
         int nCellTriangles() const {return m_nCellTriangles;}
 
         void scaleSweep(double NewSweep);

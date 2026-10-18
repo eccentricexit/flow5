@@ -224,7 +224,7 @@ class FL5LIB_EXPORT Panel3 : public Panel
         int oppositeIndex() const {return m_iOppositeIndex;}
         void setOppositeIndex(int idx) {m_iOppositeIndex=idx;}
 
-        /** The triangles of the quad cell this panel was cut from, on a wing's strips (Surface::makeTriPanels(), uav#200): 2, the cell split along
+        /** The triangles of the quad cell this panel was cut from, on a wing's strips (Surface::makeTriPanels()): 2, the cell split along
          *  one diagonal, the default; 4, the cell split about its centre node. The strip walks read their cells by it. */
         int nCellTriangles() const {return m_nCellTriangles;}
         void setCellTriangles(int n) {m_nCellTriangles=n;}
@@ -441,7 +441,7 @@ inline Vector3d Panel3::midTrailingPoint() const
  * The midpoint of the leading edge of the strip this panel ends: to be called on the last panel of a strip walked upstream
  * from its trailing panel via the iPU links, see Surface::makeTriPanels().
  * That triangle is the upstream triangle of the leading cell, with nodes (LA, TA, LB) or (TB, LB, LA) for a mid-surface
- * left or right panel, and (LA, LB, TA) or (LA, LB, TB) for the bottom of a thick surface; with centred cells (uav#200)
+ * left or right panel, and (LA, LB, TA) or (LA, LB, TB) for the bottom of a thick surface; with centred cells
  * the vertex off the leading edge is the cell's centre node C instead: (LA, C, LB), (C, LB, LA), (LA, LB, C).
  */
 inline Vector3d Panel3::leadingEdgeMidpoint() const

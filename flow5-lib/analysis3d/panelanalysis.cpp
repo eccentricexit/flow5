@@ -831,7 +831,7 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     alpha = alphaeq;
     if(m_pPolar3d->isQuadMethod())
     {
-        // VLM2: the sideslip model of the thin triangle surfaces below (uav#79), on the vortex lattice (uav#81): the wake's yaw in the circulation
+        // VLM2: the sideslip model of the thin triangle surfaces below, on the vortex lattice: the wake's yaw in the circulation
         // (P4Analysis::yawedWakeProduct(): the trailing legs of the horseshoes), the far-field side force with the Trefftz plane perpendicular to
         // the yawed wake, and the free-stream force of the rings' chordwise legs in the near-field moment (P4Analysis::forces(), rule 3)
         bool bSideslipModel = m_pPolar3d->isVLM2();
@@ -863,7 +863,7 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
-        // The sideslip derivatives follow the physics of a wing in sideslip (uav#79; thick surfaces uav#80), in three parts.
+        // The sideslip derivatives follow the physics of a wing in sideslip, in three parts.
         // 1. The wake leaves the trailing edges along the free stream: in a sideslip of the angle theta it is yawed by theta from the body x axis, which changes
         //    the circulation. To first order, mu(V+) = mu_linear(V+) + theta dmu and mu(V-) = mu_linear(V-) - theta dmu, with dmu = -A^-1 (dA_wake/dtheta) mu0,
         //    A the influence matrix of the x-aligned wake and mu0 the solution of the reference state. The derivative of the wake's rows is a central
@@ -871,8 +871,8 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         // 2. The far-field force has its Trefftz plane perpendicular to that wake (m_bSideslipFarField), and CY is taken from it.
         // 3. The free-stream force on the sheet's vorticity is applied where the vorticity is (m_bSideslipVorticity). On thick surfaces the vorticity of the
         //    closed surface is the thickness' as well, which the free stream alone does not load (Clb 0.25 against 0.13 thin on one wing): the force is put
-        //    on the lifting vorticity, the jump mu_top - mu_bottom on the strips' mean surface (P3Analysis::meanSheetVorticityLoad(), uav#80).
-        //    Left out on the triangle methods (uav#188): the moment of the induced drag's distribution in sideslip, a wing's own induced yaw, which neither
+        //    on the lifting vorticity, the jump mu_top - mu_bottom on the strips' mean surface (P3Analysis::meanSheetVorticityLoad()).
+        //    Left out on the triangle methods: the moment of the induced drag's distribution in sideslip, a wing's own induced yaw, which neither
         //    the far field nor the Kutta-Joukowski load of a doublet sheet gives (P3Analysis::forces()); VLM2 has it in its lattice's near-field load
         //    (P4Analysis::boundVortexLoad()). Left out on thick surfaces, as on the thin sheet and in AVL: the moment of the fluid's impulse, -V x (M_a V),
         //    which a body of thickness carries in a translation (Munk's moment; flow5tools/dev/addedmass.py measures it).
@@ -1124,7 +1124,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         Momentm = m_MomentFF + m_MomentLift;
     }
     // the triangle methods' p and r moments: the far-field strip forces at the quarter-chord points plus the strips' normal load where it acts
-    // (m_MomentLift, uav#198), the suction left at the quarter-chord points (P3Analysis::forces(), rule 2); the q moment takes the whole chordwise load
+    // (m_MomentLift), the suction left at the quarter-chord points (P3Analysis::forces(), rule 2); the q moment takes the whole chordwise load
     SD.Yp = (Forcep -Forcem ).dot(js) /rotationrate/2.0;
     SD.Lp = (Momentp-Momentm).dot(is) /rotationrate/2.0;
     SD.Np = (Momentp-Momentm).dot(ks) /rotationrate/2.0;
