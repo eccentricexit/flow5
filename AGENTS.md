@@ -12,6 +12,10 @@ what it measured before and after.
   the method leaves the number out and says so in its output.
 - **Methods differ.** Hold a method to a derivation or a measurement, not to another method: two methods agreeing proves
   nothing, and a term kept so that they agree is a fit. Each method's limits are stated at the function that carries them.
+- **A disagreement is a lead, never a verdict.** Two methods that model the same physics agree where neither leaves a term
+  out; where they differ, the difference must be the term one has and the other lacks, in size and in sign. A difference with
+  no such term, or larger than the term explains, or growing with the mesh, is a defect in one of them until shown otherwise:
+  derive what each should give and find which is wrong. A reference code is one more method in this sense.
 - **Breaking changes are welcome** when they serve the headless use: upstream compatibility, the GUI's conveniences and the
   `.fl5` export yield to a correct headless result. Say in the PR what breaks.
 - **Every physical model is documented at its function**: what it computes, its basis (the equation, the paper, the AVL
