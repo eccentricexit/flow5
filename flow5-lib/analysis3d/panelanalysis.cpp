@@ -1087,6 +1087,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     // p-derivatives
     if(m_pPolar3d->isQuadMethod())
     {
+        m_bRollRate = true;            // VLM2: the chordwise legs' onset load, the tip suction of the rolling wing (P4Analysis::boundVortexLoad())
         mup = m_UpRHS.data();
         m_Omega = is*rotationrate;
         forces(mup, Sigma.data()+0*N, alphaeq, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
@@ -1096,6 +1097,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         forces(mum, Sigma.data()+3*N, alphaeq, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
         Momentm = m_MomentFF;
         m_Omega.set(0.0, 0.0, 0.0);
+        m_bRollRate = false;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {
