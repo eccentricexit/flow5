@@ -1889,11 +1889,28 @@ void PlaneXfl::rotateFlapNodes(const std::vector<Panel3> &panel3, std::vector<No
 /**
  * Seals the ends of the deflected flaps.
  * Each surface has its own nodes aft of the hinge, so a flap rotated alone leaves an open slot at each of its ends,
- * between its end section and the neighbouring surface's. At each junction where the two surfaces' deflections differ,
- * the two copies of each node on the junction section, which coincide in the reference geometry, are both set to the
- * mean deflection: the flap's end strip and the neighbour's end strip are warped, each taking half of the change, so
- * the slot is closed and the deflected span is unchanged to first order.
- * The rotations are about the deflected flap's hinge, or about each flap's own hinge when both are deflected.
+ * between its end section and the neighbouring surface's. At each junction where the two copies of the junction
+ * section's nodes, which coincide in the reference geometry, have been moved apart, both copies are set to the mean
+ * deflection about the junction's hinge: the flap's end strip and the neighbour's end strip are warped, each taking
+ * half of the change, so the slot is closed and the deflected span is unchanged to first order.
+ * The copies part in two cases. (1) The two deflections differ. (2) The two hinges are not collinear, as at a dihedral
+ * break or where the hinge line bends in plan (a crank in sweep or taper): a node aft of the hinge by r, turned by the
+ * same angle t about each surface's hinge h_a and h_b, lands at points t (h_a-h_b) x r apart, normal to the surface, so
+ * even an equal deflection opens the junction. On a 25 deg break with a 22 deg sweep, a 0.135 m chord, a hinge at 75%
+ * chord and t = 4 deg, that is 0.95 mm at the trailing edge, of the order of the trailing-edge panels of a 13-panel
+ * chord. The two end strips are not connected (each surface keeps its own flap nodes), so each strip's edge carries the
+ * jump of its doublet, a line vortex; where the two edges coincide the two vortices cancel, where they are a panel size
+ * apart each lies in the near field of the other strip's panels. With the linear-doublet (TRILINEAR) method the result
+ * is then erratic in the deflection, not a small error: on that wing, with both panels at the break deflected by 2, 4,
+ * 5 and 8 deg, the static margin was 0.137, undefined (the lift of the whole polar negative at 4 deg), -0.484 and
+ * 0.174, against 0.078 undeflected; with the junction sealed it is 0.077, 0.077, 0.076 and 0.075. The uniform-doublet
+ * (TRIUNIFORM) method, collocated at the centroids, drifted (0.084 to 0.126) where it now reads 0.075 to 0.073.
+ * The junction's hinge is the bisector of the two hinges through their common point, the hinge point of the junction
+ * section: a node on the junction section's chord line turned about it stays, to first order, in the plane of that
+ * section, which lies between the two surfaces' planes. Where only one of the two surfaces has a flap, it is that
+ * flap's hinge.
+ * Each copy's own flap rotation is undone, about its own hinge, before the junction rotation by the mean deflection;
+ * where the two hinges are collinear this is the single rotation by the difference, about that hinge.
  * The panels must then be rebuilt from the nodes.
  * @param panel3 the panels, whose node indexes are used
  * @param refnode the nodes in the reference geometry, used to find the coincident nodes
@@ -1940,12 +1957,24 @@ int PlaneXfl::sealFlapEnds(std::vector<Panel3> const &panel3, std::vector<Node> 
             bool bDefA = fabs(ta)>ANGLEPRECISION;
             bool bDefB = fabs(tb)>ANGLEPRECISION;
             if(!bDefA && !bDefB) continue;
-            if(fabs(ta-tb)<=ANGLEPRECISION) continue; // deflected together: no slot
+
+            // the junction's hinge: the bisector of the two hinges through the junction section's hinge point
+            Vector3d jPoint, jVector;
+            if(sa.hasTEFlap() && sb.hasTEFlap())
+            {
+                jPoint  = sb.hingePoint(); // the left end of the right surface's hinge, on the junction section
+                jVector = (sa.hingeVector()+sb.hingeVector()).normalized();
+            }
+            else
+            {
+                Surface const &sf = sa.hasTEFlap() ? sa : sb;
+                jPoint  = sf.hingePoint();
+                jVector = sf.hingeVector();
+            }
+            bool bCollinear = !(sa.hasTEFlap() && sb.hasTEFlap()) || (sa.hingeVector()*sb.hingeVector()).norm()<1.0e-9;
+            if(fabs(ta-tb)<=ANGLEPRECISION && bCollinear) continue; // deflected together about one hinge line: no slot
 
             double tmean = (ta+tb)/2.0;
-            // the hinge each side's nodes turn about
-            Surface const &ha = bDefA ? sa : sb;
-            Surface const &hb = bDefB ? sb : sa;
 
             // the nodes rotated with each flap, and all the nodes of each surface
             std::vector<int> const flapA = bDefA ? nodesOf(sa.flapPanel3()) : std::vector<int>();
@@ -1966,16 +1995,18 @@ int PlaneXfl::sealFlapEnds(std::vector<Panel3> const &panel3, std::vector<Node> 
                     if(!bFlapA && !bFlapB) continue; // neither copy moved with a flap
                     if(!refnode.at(ia).isSame(refnode.at(ib), 0.0001)) continue;
 
-                    double da = tmean - (bFlapA ? ta : 0.0);
-                    double db = tmean - (bFlapB ? tb : 0.0);
                     if(!bDone[ia])
                     {
-                        if(fabs(da)>ANGLEPRECISION) {node[ia].rotate(ha.hingePoint(), ha.hingeVector(), da); nMoved++;}
+                        if(bFlapA) node[ia].rotate(sa.hingePoint(), sa.hingeVector(), -ta);
+                        if(fabs(tmean)>ANGLEPRECISION) node[ia].rotate(jPoint, jVector, tmean);
+                        if(bFlapA || fabs(tmean)>ANGLEPRECISION) nMoved++;
                         bDone[ia] = true;
                     }
                     if(!bDone[ib])
                     {
-                        if(fabs(db)>ANGLEPRECISION) {node[ib].rotate(hb.hingePoint(), hb.hingeVector(), db); nMoved++;}
+                        if(bFlapB) node[ib].rotate(sb.hingePoint(), sb.hingeVector(), -tb);
+                        if(fabs(tmean)>ANGLEPRECISION) node[ib].rotate(jPoint, jVector, tmean);
+                        if(bFlapB || fabs(tmean)>ANGLEPRECISION) nMoved++;
                         bDone[ib] = true;
                     }
                 }
