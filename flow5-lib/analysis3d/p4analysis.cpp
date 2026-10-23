@@ -1029,7 +1029,7 @@ void P4Analysis::VLMGetVortexInfluence(Panel4 const &p4, Vector3d const &C, doub
 *    because with the yawed legs a wing's Cnb over NACA TN 1581 eq 21 grew with the aspect ratio (1.8 at A 10, 2.1 at A 40 unswept) where it
 *    was expected to tend to 1. It need not: a trailing leg leaving a lifting line at an angle induces a sidewash whose span integral is
 *    log(span/chord), so the thin-wing Cnb has no chord-free limit and that formula (strip theory, Toll and Queijo 1948) is not one. An
-*    independent lattice (flow5tools/dev/lattice.py) gives the same values. Limit: the chordwise legs' own induced load (boundVortexLoad()).
+*    independent vortex-lattice code with the same yawed legs gives the same values. Limit: the chordwise legs' own induced load (boundVortexLoad()).
 * 4. The moment of every other state (the polar's Cm through PlaneTask::computePlane(), the u and w derivatives, so Cma and the neutral
 *    point) is the near-field load's too. Basis: the on-body moment crosses each bound vortex with the free-stream direction only,
 *    which leaves out the force of the induced velocity on it, the induced drag and its lever: a wing with dihedral or sweep has one in
