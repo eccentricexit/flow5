@@ -2434,6 +2434,9 @@ bool PlaneTask::applySideslipModel(double alpha, double beta, double Q, Vector3d
     // Thick surfaces: the point's moment is the on-body pressure moment, without a leading-edge force, so the plain model's change it carries is that of the
     // pressures (OA-OE), not that of the strips (MA-ME); with it the point's moment changes by the sideslip model's (MB-MD), as the derivatives
     if(pPA->hasThickSurfaces()) m_dMomentRate = ((MB-MD) - (OA-OE)) * (1.0/qDyn);     // N.m/q
+    // and, as the derivatives, the change of the thickness' Munk moment, -U x (M_t U) (PanelAnalysis::addThicknessImpulse()), which the lifting model on the
+    // mean surface has not and the pressures' change (OA-OE) took out
+    if(pPA->hasThickSurfaces()) m_dMomentRate += (pPA->thicknessMunkMoment(V) - pPA->thicknessMunkMoment(V0)) * (1.0/qDyn);     // N.m/q
     return true;
 }
 

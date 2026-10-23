@@ -264,6 +264,22 @@ void PanelAnalysis::computeAddedMass()
  * Limits: potential flow. How much of the impulse a real wing's flow keeps is not measured; on bodies of revolution the part on a closing afterbody is
  * lost to the boundary layer. The steady points with rates (type 8) do not carry it.
  */
+/**
+ * The moment (N.m, geometry axes) of the thickness' impulse on the plane in the steady translation of an air velocity V relative to it (the plane moving at
+ * -V): Kirchhoff's -U x P with P = M_t U, the translational block of m_ThicknessMass (addThicknessImpulse()): Munk's moment, the same about any point.
+ * Zero where the tensor is not derived.
+ */
+Vector3d PanelAnalysis::thicknessMunkMoment(Vector3d const &V) const
+{
+    if(m_ThicknessMass.size()!=36 || !m_pPolar3d) return Vector3d();
+    Vector3d const U = V * (-1.0);
+    Vector3d P(m_ThicknessMass[0]*U.x  + m_ThicknessMass[1]*U.y  + m_ThicknessMass[2]*U.z,
+               m_ThicknessMass[6]*U.x  + m_ThicknessMass[7]*U.y  + m_ThicknessMass[8]*U.z,
+               m_ThicknessMass[12]*U.x + m_ThicknessMass[13]*U.y + m_ThicknessMass[14]*U.z);
+    return (U * P) * (-m_pPolar3d->density());
+}
+
+
 void PanelAnalysis::addThicknessImpulse(double alphaeq, double u0, Vector3d const &CoG, StabDerivatives &SD) const
 {
     SD.Impulse.clear();
