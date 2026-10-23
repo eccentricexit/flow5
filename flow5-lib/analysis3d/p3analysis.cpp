@@ -28,6 +28,8 @@
 #include <format>
 #include <thread>
 #include <array>
+#include <map>
+#include <algorithm>
 
 
 #include <p3analysis.h>
@@ -856,6 +858,182 @@ bool P3Analysis::hasThickSurfaces() const
     for(Panel3 const &p3 : m_Panel3)
         if(p3.isTrailing() && p3.isBotPanel()) return true;
     return false;
+}
+
+
+/**
+ * Whether the panels form closed surfaces: every edge of every triangle is shared by exactly two triangles, two nodes being one where they lie within a
+ * thousandth of the mesh's shortest edge of each other (a distinct node is never that close). False, with the reason, where an edge bounds one triangle only:
+ * a foil whose trailing edge has a gap keeps its top and bottom trailing nodes apart with no base panel between them, an open tip or root has no closing
+ * patch; or where an edge is shared by more than two (surfaces that cross).
+ */
+bool P3Analysis::closedSurfaceCheck(std::string &reason) const
+{
+    reason.clear();
+    int maxIndex = -1;
+    double hmin = -1.0;
+    for(Panel3 const &p3 : m_Panel3)
+    {
+        for(int k=0; k<3; k++)
+        {
+            maxIndex = std::max(maxIndex, p3.vertexAt(k).index());
+            double h = (p3.vertexAt(k+1)-p3.vertexAt(k)).norm();
+            if(h>0.0 && (hmin<0.0 || h<hmin)) hmin = h;
+        }
+    }
+    if(maxIndex<0 || hmin<=0.0)
+    {
+        reason = "the mesh has no triangles";
+        return false;
+    }
+    double const tol = 1.0e-3*hmin;
+
+    std::vector<Vector3d> pos(maxIndex+1);
+    std::vector<char> used(maxIndex+1, 0);
+    for(Panel3 const &p3 : m_Panel3)
+        for(int k=0; k<3; k++) {pos[p3.vertexAt(k).index()] = p3.vertexAt(k); used[p3.vertexAt(k).index()] = 1;}
+
+    std::vector<int> parent(maxIndex+1);
+    for(int i=0; i<=maxIndex; i++) parent[i] = i;
+    auto find = [&](int a){while(parent[a]!=a){parent[a]=parent[parent[a]]; a=parent[a];} return a;};
+    std::vector<int> order;
+    for(int i=0; i<=maxIndex; i++) if(used[i]) order.push_back(i);
+    std::sort(order.begin(), order.end(), [&](int a, int b){return pos[a].x<pos[b].x;});
+    for(unsigned i=0; i<order.size(); i++)
+        for(unsigned j=i+1; j<order.size() && pos[order[j]].x-pos[order[i]].x<tol; j++)
+            if((pos[order[j]]-pos[order[i]]).norm()<tol) parent[find(order[j])] = find(order[i]);
+
+    std::map<std::pair<int,int>, int> edges;
+    std::map<std::pair<int,int>, int> edgePanel;
+    for(int i3=0; i3<nPanels(); i3++)
+    {
+        Panel3 const &p3 = m_Panel3.at(i3);
+        for(int k=0; k<3; k++)
+        {
+            int a = find(p3.vertexAt(k).index()), b = find(p3.vertexAt(k+1).index());
+            if(a==b) continue;   // a null edge of a degenerate triangle
+            std::pair<int,int> e(std::min(a,b), std::max(a,b));
+            edges[e]++;
+            edgePanel[e] = i3;
+        }
+    }
+    int nOpen = 0, nTrailing = 0, nShared = 0;
+    for(auto const &e : edges)
+    {
+        if(e.second==1)
+        {
+            nOpen++;
+            Panel3 const &p3 = m_Panel3.at(edgePanel[e.first]);
+            if(p3.isTrailing() && !p3.isSidePanel()) nTrailing++;
+        }
+        else if(e.second>2) nShared++;
+    }
+    if(nOpen==0 && nShared==0) return true;
+    if(nOpen>0 && nTrailing==nOpen)
+        reason = std::format("the thick surfaces are not closed: {} edges along the trailing edges bound one triangle only (a foil with a trailing-edge gap, "
+                             "whose top and bottom trailing nodes are apart with no base panel between them)", nOpen);
+    else if(nOpen>0)
+        reason = std::format("the thick surfaces are not closed: {} edges bound one triangle only ({} of them along the trailing edges; the others an open "
+                             "tip or root, or surfaces whose meshes do not meet edge to edge)", nOpen, nTrailing);
+    else
+        reason = std::format("the thick surfaces cross: {} edges are shared by more than two triangles", nShared);
+    return false;
+}
+
+
+/**
+ * The added-mass tensor M of the closed thick surfaces: the impulse of the fluid that a body moving through it at rest carries, P = M_tt U + M_tr Omega,
+ * L = M_rt U + M_rr Omega (Lamb, Hydrodynamics, 6th ed., 1932, secs. 117-124), U the velocity of the reference point m_AddedMassRef (the polar's CoG)
+ * and Omega the rotation, geometry axes. Called with the influence matrix of the surfaces alone, before the wake's columns are added: the acyclic problem,
+ * no circulation.
+ *
+ * Derivation, and its signs. With n the normal out of the body and phi_j the potential of the unit motion j (dphi_j/dn = n_j, n_j = n for the
+ * translations and (r - CoG) x n for the rotations), the fluid's kinetic energy is T = -1/2 rho int phi dphi/dn dA (Green's theorem over the fluid, whose
+ * outward normal on the body is -n), so that M_ij / rho = -int phi_j n_i dA. The unit right-hand sides are the onsets of a body at rest, e_j for a
+ * translation (m_uRHS, m_vRHS, m_wRHS) and (r - CoG) x e_j for a rotation (m_pRHS, m_qRHS, m_rRHS). The perturbation potential of an onset is the
+ * potential of the body moving through still fluid with the opposite velocity field: a translation +e_j is the onset -e_j, a rotation +e_j the onset
+ * (r - CoG) x e_j. The Dirichlet formulation's unknown is the doublet density mu, whose surface velocity is -4 pi grad mu
+ * (makePanelDoubletSurfaceVelocity()): the perturbation potential is -4 pi mu plus a constant, which adds nothing to M on a closed surface (the integrals
+ * of n and of (r - CoG) x n over it are zero). Hence phi_j = +4 pi mu_j for a translation and -4 pi mu_j for a rotation, mu_j solved for the onset
+ * m_*RHS. Checked: M is positive definite, and its translations meet an independent constant-source code to within its stated error on the
+ * NACA 0012 wings of the measurements (see the pull request); on a closed body the collocated M is symmetric to the discretisation's residual
+ * (m_AddedMassAsymmetry), and it is stored symmetrised.
+ *
+ * Not derived, with the reason in m_AddedMassReason: thin surfaces (a sheet has no thickness, and the thin sheet's lifting model is the whole of its
+ * potential flow), the Neumann formulation (its doublet density is not the surface potential), surfaces that are not closed (closedSurfaceCheck()):
+ * the integrals above hold on a closed surface only, and on an open one the Dirichlet condition inside the body is not that of the body's own interior.
+ * Cost: one more LU factorisation of the surfaces' matrix, and a copy of it.
+ */
+void P3Analysis::computeAddedMass()
+{
+    m_AddedMass.clear();
+    m_AddedMassAsymmetry = 0.0;
+    m_AddedMassReason.clear();
+    if(!m_pPolar3d) {m_AddedMassReason = "no analysis"; return;}
+    m_AddedMassRef = m_pPolar3d->CoG();
+
+    for(Panel3 const &p3 : m_Panel3)
+        if(p3.isMidPanel())
+        {
+            m_AddedMassReason = "the surfaces are thin: a sheet has no thickness, and its lifting model is the whole of its potential flow";
+            return;
+        }
+    if(m_pPolar3d->bNeumann())
+    {
+        m_AddedMassReason = "the Neumann formulation's doublet density is not the surface potential";
+        return;
+    }
+    if(!closedSurfaceCheck(m_AddedMassReason)) return;
+
+    int const N = nPanels();
+    int const n = matSize();
+    bool const bLin = m_pPolar3d->isTriLinearMethod();
+    if(n!=(bLin ? 3*N : N)) {m_AddedMassReason = "unexpected matrix size"; return;}
+
+    // the matrix of the surfaces is stored by rows (row*n+col) and LAPACK reads columns: its transpose, column-major, is the copy
+    std::vector<double> A(size_t(n)*size_t(n));
+    for(int r=0; r<n; r++)
+        for(int c=0; c<n; c++)
+            A[size_t(c)*size_t(n)+size_t(r)] = s_bDoublePrecision ? m_aijd[size_t(r)*size_t(n)+size_t(c)] : double(m_aijf[size_t(r)*size_t(n)+size_t(c)]);
+
+    std::vector<double> B(size_t(n)*6);
+    std::vector<double> const *rhs[] = {&m_uRHS, &m_vRHS, &m_wRHS, &m_pRHS, &m_qRHS, &m_rRHS};
+    for(int j=0; j<6; j++)
+        for(int r=0; r<n; r++) B[size_t(j)*size_t(n)+size_t(r)] = rhs[j]->at(r);
+
+    if(!solveDense(A, n, B, 6))
+    {
+        m_AddedMassReason = "the matrix of the surfaces without their wake is singular";
+        return;
+    }
+
+    std::array<double, 36> M{};
+    for(int k=0; k<N; k++)
+    {
+        Panel3 const &p3 = m_Panel3.at(k);
+        Vector3d const nk = p3.normal();
+        Vector3d const rk = (p3.CoG()-m_AddedMassRef) * nk;
+        double const g[6] = {nk.x, nk.y, nk.z, rk.x, rk.y, rk.z};
+        for(int j=0; j<6; j++)
+        {
+            double const *mu = B.data() + size_t(j)*size_t(n);
+            double mubar = bLin ? (mu[3*k]+mu[3*k+1]+mu[3*k+2])/3.0 : mu[k];
+            double phi = (j<3 ? 4.0*PI : -4.0*PI) * mubar;
+            for(int i=0; i<6; i++) M[size_t(6*i+j)] -= phi * g[i] * p3.area();
+        }
+    }
+
+    double mmax = 0.0, amax = 0.0;
+    for(int i=0; i<6; i++)
+        for(int j=0; j<6; j++)
+        {
+            mmax = std::max(mmax, fabs(M[size_t(6*i+j)]));
+            amax = std::max(amax, fabs(M[size_t(6*i+j)]-M[size_t(6*j+i)]));
+        }
+    m_AddedMassAsymmetry = mmax>0.0 ? amax/mmax : 0.0;
+    m_AddedMass.resize(36);
+    for(int i=0; i<6; i++)
+        for(int j=0; j<6; j++) m_AddedMass[size_t(6*i+j)] = 0.5*(M[size_t(6*i+j)]+M[size_t(6*j+i)]);
 }
 
 

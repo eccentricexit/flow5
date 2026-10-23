@@ -138,6 +138,14 @@ class FL5LIB_EXPORT PanelAnalysis
         void makeRHS(const std::vector<Vector3d> &VField, std::vector<double> &RHS, const Vector3d *normals);
 
         void addWakeContribution();
+        virtual void computeAddedMass();
+        /** The added-mass tensor over the density of the closed thick surfaces (computeAddedMass()): 36 values, row-major, the generalised coordinates the
+         *  translations along x, y, z and the rotations about x, y, z through addedMassReference(), geometry axes; m^3 between translations, m^4 between a
+         *  translation and a rotation, m^5 between rotations. Empty where it is not derived: addedMassReason() says why. */
+        std::vector<double> const &addedMass() const {return m_AddedMass;}
+        Vector3d const &addedMassReference() const {return m_AddedMassRef;}
+        std::string const &addedMassReason() const {return m_AddedMassReason;}
+        double addedMassAsymmetry() const {return m_AddedMassAsymmetry;}
         void computeStabilityDerivatives(  double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD, Vector3d &Force0, Vector3d &Moment0);
         void computeTranslationDerivatives(double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD, Vector3d &Force0, Vector3d &Moment0);
         void computeAngularDerivatives(    double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD);
@@ -174,6 +182,7 @@ class FL5LIB_EXPORT PanelAnalysis
         bool LUfactorize();
         virtual void backSubUnitRHS(double *uRHS, double *vRHS, double*wRHS, double *pRHS, double *qRHS, double*rRHS);
         bool backSubRHS(std::vector<double> &RHS);
+        static bool solveDense(std::vector<double> &A, int n, std::vector<double> &B, int nrhs);
 
         /** Adds v to the entry (row, col) of the influence matrix, or, in the matrix-vector mode of yawedWakeProduct(), v times mu[col] to entry row of the product. Rows are never shared between threads. */
         void addWakeEntry(int row, int col, int N, double v)
@@ -192,6 +201,11 @@ class FL5LIB_EXPORT PanelAnalysis
         std::vector<double> m_aijd;  /**< the matrix of panel influences - double precision; std::vector is limited to 2 GB and is unusable*/
         std::vector<float>  m_aijf;  /**< the matrix of panel influences - single precision; std::vector is limited to 2 GB and is unusable*/
         std::vector<int>    m_ipiv;  /** the array of pivot indices for the LAPACK LU solver */
+
+        std::vector<double> m_AddedMass;      /**< the added-mass tensor over the density, 6 x 6 row-major, set by computeAddedMass(); empty where it is not derived */
+        Vector3d m_AddedMassRef;              /**< the point the tensor's rotations are about: the polar's CoG, as in the unit right-hand sides */
+        std::string m_AddedMassReason;        /**< why the tensor is not derived, when it is empty */
+        double m_AddedMassAsymmetry = 0.0;    /**< the largest |m_ij - m_ji| over the largest |m_ij| of the collocated tensor before it is symmetrised */
 
 
         // unit RHS for the 6 motion d.o.f

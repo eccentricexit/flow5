@@ -3423,6 +3423,20 @@ bool PlaneTask::setLinearSolution()
 
     if(!m_pPlPolar->isVLM())
     {
+        // the added masses of the closed surfaces, from the matrix before the wake is added (P3Analysis::computeAddedMass())
+        traceStdLog("   Making the added masses...");
+        m_pPA->computeAddedMass();
+        end = std::chrono::system_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        start = end;
+        if(m_pPA->addedMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->addedMassReason());
+        else                           strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
+        traceStdLog(strange);
+    }
+    if (isCancelled()) return true;
+
+    if(!m_pPlPolar->isVLM())
+    {
         traceStdLog("   Adding the wake's contribution...");
         m_pPA->addWakeContribution();
 

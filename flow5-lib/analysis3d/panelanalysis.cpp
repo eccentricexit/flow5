@@ -218,6 +218,30 @@ bool PanelAnalysis::LUfactorize()
 }
 
 
+/** Solves A X = B in place, A (n x n) and B (n x nrhs) column-major, A overwritten by its LU factors. False if A is singular. */
+bool PanelAnalysis::solveDense(std::vector<double> &A, int n, std::vector<double> &B, int nrhs)
+{
+#ifdef OPENBLAS
+    openblas_set_num_threads(s_MaxThreads);
+#elif defined INTEL_MKL
+    MKL_Set_Num_Threads_Local(s_MaxThreads);
+#endif
+    lapack_int nn = n, lda = n, ldb = n, nr = nrhs, info = -1;
+    std::vector<lapack_int> ipiv(n);
+    dgesv_(&nn, &nr, A.data(), &lda, ipiv.data(), B.data(), &ldb, &info);
+    return info==0;
+}
+
+
+/** No added masses outside the triangle methods' thick surfaces (P3Analysis::computeAddedMass()). */
+void PanelAnalysis::computeAddedMass()
+{
+    m_AddedMass.clear();
+    m_AddedMassAsymmetry = 0.0;
+    m_AddedMassReason = "the added masses are derived on the thick surfaces of the triangle methods only";
+}
+
+
 /**
 * Solves the linear system for the unit RHS, using LU decomposition
 */

@@ -82,6 +82,8 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         bool computeTrimmedConditions(double mass, Vector3d const &CoG, double &alphaeq, double &u0, bool bFuseMi) override;
         int makeWakePanels(Vector3d const &WindDirection, bool bVortonWake) override;
         bool hasThickSurfaces() const override;
+        void computeAddedMass() override;
+        bool closedSurfaceCheck(std::string &reason) const;
         bool wakeRowExcluded(int i3, int k3) const;
         bool yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product) override;
         void scaleResultsToSpeed(double ratio) override;
