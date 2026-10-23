@@ -146,6 +146,11 @@ class FL5LIB_EXPORT PanelAnalysis
         Vector3d const &addedMassReference() const {return m_AddedMassRef;}
         std::string const &addedMassReason() const {return m_AddedMassReason;}
         double addedMassAsymmetry() const {return m_AddedMassAsymmetry;}
+        /** The thickness' part of the impulse (P3Analysis::makeThicknessImpulse()), 36 values row-major as addedMass(), not symmetric: row i the impulse's
+         *  component, column j the unit motion. Empty where it is not derived: thicknessReason() says why. It is what addThicknessImpulse() puts in the derivatives. */
+        std::vector<double> const &thicknessMass() const {return m_ThicknessMass;}
+        std::string const &thicknessReason() const {return m_AddedMass.empty() ? m_AddedMassReason : m_ThicknessReason;}
+        void addThicknessImpulse(double alphaeq, double u0, Vector3d const &CoG, StabDerivatives &SD) const;
         void computeStabilityDerivatives(  double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD, Vector3d &Force0, Vector3d &Moment0);
         void computeTranslationDerivatives(double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD, Vector3d &Force0, Vector3d &Moment0);
         void computeAngularDerivatives(    double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD);
@@ -206,6 +211,8 @@ class FL5LIB_EXPORT PanelAnalysis
         Vector3d m_AddedMassRef;              /**< the point the tensor's rotations are about: the polar's CoG, as in the unit right-hand sides */
         std::string m_AddedMassReason;        /**< why the tensor is not derived, when it is empty */
         double m_AddedMassAsymmetry = 0.0;    /**< the largest |m_ij - m_ji| over the largest |m_ij| of the collocated tensor before it is symmetrised */
+        std::vector<double> m_ThicknessMass;  /**< the thickness' part of the impulse, 6 x 6 row-major, over the density, about m_AddedMassRef; empty where it is not derived */
+        std::string m_ThicknessReason;        /**< why m_ThicknessMass is not derived, when the added masses are */
 
 
         // unit RHS for the 6 motion d.o.f

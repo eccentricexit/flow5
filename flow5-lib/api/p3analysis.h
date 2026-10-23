@@ -26,6 +26,8 @@
 
 
 
+#include <array>
+
 #include <panel3.h>
 #include <panelanalysis.h>
 #include <trimesh.h>
@@ -84,6 +86,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         bool hasThickSurfaces() const override;
         void computeAddedMass() override;
         bool closedSurfaceCheck(std::string &reason) const;
+        template<typename F> void makeThicknessImpulse(std::vector<std::array<double,6>> const &phi, F const &integrate);
         bool wakeRowExcluded(int i3, int k3) const;
         bool yawedWakeProduct(double theta, std::vector<double> const &mu, std::vector<double> &product) override;
         void scaleResultsToSpeed(double ratio) override;

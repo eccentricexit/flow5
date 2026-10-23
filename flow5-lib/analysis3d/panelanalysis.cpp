@@ -237,8 +237,95 @@ bool PanelAnalysis::solveDense(std::vector<double> &A, int n, std::vector<double
 void PanelAnalysis::computeAddedMass()
 {
     m_AddedMass.clear();
+    m_ThicknessMass.clear();
     m_AddedMassAsymmetry = 0.0;
     m_AddedMassReason = "the added masses are derived on the thick surfaces of the triangle methods only";
+}
+
+
+/**
+ * Kirchhoff's force and moment of the thickness' impulse in the derivatives taken from the strips' load (Lamb, Hydrodynamics, 6th ed., 1932, secs. 121-124).
+ *
+ * A body moving with the velocity U of its reference point and turning at Omega through fluid at rest, the fluid's impulse P (linear) and L (angular, about
+ * that point), feels F = -(dP/dt + Omega x P) and G = -(dL/dt + Omega x L + U x P), body axes. Steady, about the steady flight U0 = (u0, 0, 0), Omega0 = 0,
+ * stability axes (is, js, ks of computeTranslationDerivatives(), the plane's own velocity and rotation, as the derivatives are), to first order:
+ *     dF = -dOmega x P0,    dG = -dU x P0 - U0 x dP - dOmega x L0,
+ * with P0, L0 the impulse of U0 and dP = A dU + B dOmega, dL = C dU + D dOmega the impulse of the perturbation, [A B; C D] the thickness' tensor m_ThicknessMass
+ * (P3Analysis::makeThicknessImpulse()) moved to the CoG and turned into stability axes. Every term of the tensor comes in this way: on a flat wing
+ * Yr = -rho u0 m11 (the side force of the yaw rate), Nv = rho u0 (m11 - m22) (Munk's yawing moment), Zq = rho u0 m11 and, with the CoG off the
+ * axes of the tensor, the couplings of the translations and the rotations (Np = -rho u0 (m24 + m15), Lr = rho u0 m15, Nr = -rho u0 m26).
+ *
+ * Which derivatives take it: those whose force or moment is the strips' load (the far-field and Kutta-Joukowski strip forces, their moment, the strips'
+ * lift pressure cell by cell): Xq, Zq; Yv, Lv, Nv; Yp, Lp, Np; Yr, Lr, Nr. The lifting model there is the mean surface's (the lift's vorticity), which
+ * has no thickness. Xu, Zu, Xw, Zw, Yv take it too, and it is zero: a translation has no force from the impulse (dOmega = 0). Not Mu, Mw and Mq: they
+ * are the pressure moment (Mq with the strips' own pressures about their quarter-chord points), and the pressures of the closed surface carry its
+ * whole potential flow, the thickness' included. Not the control derivatives: a deflection is not a motion.
+ *
+ * Limits: potential flow. How much of the impulse a real wing's flow keeps is not measured; on bodies of revolution the part on a closing afterbody is
+ * lost to the boundary layer. The steady points with rates (type 8) do not carry it.
+ */
+void PanelAnalysis::addThicknessImpulse(double alphaeq, double u0, Vector3d const &CoG, StabDerivatives &SD) const
+{
+    SD.Impulse.clear();
+    if(m_ThicknessMass.size()!=36 || !m_pPolar3d) return;
+    double const rho = m_pPolar3d->density();
+
+    // the tensor about the CoG: the motion about the CoG (U, Omega) is the motion (U + Omega x (CoG - ref), Omega) about the reference point, and the
+    // angular impulse about the CoG is L + (ref - CoG) x P
+    Vector3d const d = m_AddedMassRef - CoG;
+    double Tm[6][6] = {};
+    for(int i=0; i<6; i++) Tm[i][i] = 1.0;
+    // U_ref = U_cog - [d]x Omega with d = ref - CoG
+    double const sk[3][3] = {{0.0, -d.z, d.y}, {d.z, 0.0, -d.x}, {-d.y, d.x, 0.0}};
+    for(int i=0; i<3; i++) for(int j=0; j<3; j++) Tm[i][3+j] = -sk[i][j];
+    double M[6][6], W[6][6] = {};
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) M[i][j] = m_ThicknessMass[size_t(6*i+j)];
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) for(int k=0; k<6; k++) W[i][j] += M[i][k]*Tm[k][j];          // M T
+    double Mc[6][6] = {};
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) for(int k=0; k<6; k++) Mc[i][j] += Tm[k][i]*W[k][j];        // T^t M T
+
+    // stability axes: the rows of R are is, js, ks in geometry axes
+    double const ca = cos(alphaeq*PI/180.0), sa = sin(alphaeq*PI/180.0);
+    double const R[3][3] = {{-ca, 0.0, -sa}, {0.0, 1.0, 0.0}, {sa, 0.0, -ca}};
+    double Q[6][6] = {};
+    for(int i=0; i<3; i++) for(int j=0; j<3; j++) Q[i][j] = Q[3+i][3+j] = R[i][j];
+    double Z[6][6] = {}, Ms[6][6] = {};
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) for(int k=0; k<6; k++) Z[i][j] += Mc[i][k]*Q[j][k];          // Mc Q^t
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) for(int k=0; k<6; k++) Ms[i][j] += Q[i][k]*Z[k][j];          // Q Mc Q^t
+
+    auto impulse = [&](Vector3d const &U, Vector3d const &W3, Vector3d &P, Vector3d &L)
+    {
+        double xi[6] = {U.x, U.y, U.z, W3.x, W3.y, W3.z}, out[6] = {};
+        for(int i=0; i<6; i++) for(int j=0; j<6; j++) out[i] += Ms[i][j]*xi[j];
+        P.set(out[0], out[1], out[2]);
+        L.set(out[3], out[4], out[5]);
+    };
+    Vector3d const U0(u0, 0.0, 0.0), O0;
+    Vector3d P0, L0;
+    impulse(U0, O0, P0, L0);
+    // per unit perturbation: (dF, dG)
+    auto perturb = [&](Vector3d const &dU, Vector3d const &dW, Vector3d &dF, Vector3d &dG)
+    {
+        Vector3d dP, dL;
+        impulse(dU, dW, dP, dL);
+        dF = (dW * P0) * (-1.0);
+        dG = (dU * P0) * (-1.0) - U0 * dP - dW * L0;
+        dF *= rho;
+        dG *= rho;
+    };
+    Vector3d dF, dG;
+    perturb(Vector3d(1,0,0), O0, dF, dG);  SD.Impulse["Xu"] = dF.x;  SD.Impulse["Zu"] = dF.z;
+    perturb(Vector3d(0,0,1), O0, dF, dG);  SD.Impulse["Xw"] = dF.x;  SD.Impulse["Zw"] = dF.z;
+    perturb(O0, Vector3d(0,1,0), dF, dG);  SD.Impulse["Xq"] = dF.x;  SD.Impulse["Zq"] = dF.z;
+    perturb(Vector3d(0,1,0), O0, dF, dG);  SD.Impulse["Yv"] = dF.y;  SD.Impulse["Lv"] = dG.x;  SD.Impulse["Nv"] = dG.z;
+    perturb(O0, Vector3d(1,0,0), dF, dG);  SD.Impulse["Yp"] = dF.y;  SD.Impulse["Lp"] = dG.x;  SD.Impulse["Np"] = dG.z;
+    perturb(O0, Vector3d(0,0,1), dF, dG);  SD.Impulse["Yr"] = dF.y;  SD.Impulse["Lr"] = dG.x;  SD.Impulse["Nr"] = dG.z;
+
+    SD.Xu += SD.Impulse["Xu"];  SD.Zu += SD.Impulse["Zu"];  SD.Xw += SD.Impulse["Xw"];  SD.Zw += SD.Impulse["Zw"];
+    SD.Xq += SD.Impulse["Xq"];  SD.Zq += SD.Impulse["Zq"];
+    SD.Yv += SD.Impulse["Yv"];  SD.Lv += SD.Impulse["Lv"];  SD.Nv += SD.Impulse["Nv"];
+    SD.Yp += SD.Impulse["Yp"];  SD.Lp += SD.Impulse["Lp"];  SD.Np += SD.Impulse["Np"];
+    SD.Yr += SD.Impulse["Yr"];  SD.Lr += SD.Impulse["Lr"];  SD.Nr += SD.Impulse["Nr"];
 }
 
 
@@ -649,6 +736,7 @@ void PanelAnalysis::computeStabilityDerivatives(double alphaeq, double u0, Vecto
     SD.reset();
     computeTranslationDerivatives(alphaeq, u0, CoG, bFuseMi, SD, Force0, Moment0);
     computeAngularDerivatives(alphaeq, u0, CoG, bFuseMi, SD);
+    addThicknessImpulse(alphaeq, u0, CoG, SD);
 }
 
 
@@ -898,8 +986,8 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
         //    on the lifting vorticity, the jump mu_top - mu_bottom on the strips' mean surface (P3Analysis::meanSheetVorticityLoad()).
         //    Left out on the triangle methods: the moment of the induced drag's distribution in sideslip, a wing's own induced yaw, which neither
         //    the far field nor the Kutta-Joukowski load of a doublet sheet gives (P3Analysis::forces()); VLM2 has it in its lattice's near-field load
-        //    (P4Analysis::boundVortexLoad()). Left out on thick surfaces, as on the thin sheet and in AVL: the moment of the fluid's impulse, -V x (M_a V),
-        //    which a body of thickness carries in a translation (Munk's moment; flow5tools/dev/addedmass.py measures it).
+        //    (P4Analysis::boundVortexLoad()). The moment of the thickness' impulse in a translation (Munk's moment), which the lifting model on the
+        //    mean surface has not, is added after (addThicknessImpulse()).
         bool const bSideslipModel = true;
         if(bSideslipModel)
         {
