@@ -151,7 +151,10 @@ class FL5LIB_EXPORT PanelAnalysis
         std::vector<double> const &thicknessMass() const {return m_ThicknessMass;}
         std::string const &thicknessReason() const {return m_AddedMass.empty() ? m_AddedMassReason : m_ThicknessReason;}
         void addThicknessImpulse(double alphaeq, double u0, Vector3d const &CoG, StabDerivatives &SD) const;
-        Vector3d thicknessMunkMoment(Vector3d const &V) const;
+        void thicknessImpulseLoad(Vector3d const &V, Vector3d const &Omega, Vector3d const &CoG, Vector3d &F, Vector3d &G) const;
+        bool thicknessMassAbout(Vector3d const &CoG, double Mc[6][6]) const;
+        bool pressuresCarryThickness() const;
+        void takeAddedMass(PanelAnalysis const *pFrom, std::string const &reason);
         void computeStabilityDerivatives(  double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD, Vector3d &Force0, Vector3d &Moment0);
         void computeTranslationDerivatives(double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD, Vector3d &Force0, Vector3d &Moment0);
         void computeAngularDerivatives(    double alphaeq, double u0, Vector3d const &CoG, bool bFuseMi, StabDerivatives &SD);

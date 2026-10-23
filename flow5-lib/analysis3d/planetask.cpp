@@ -65,6 +65,7 @@
 
 
 bool PlaneTask::s_bViscInitTwist = false;
+bool PlaneTask::s_bAddedMass = true;
 double PlaneTask::s_ViscRelax = 0.5;
 double PlaneTask::s_ViscAlphaPrecision = 0.01;
 int PlaneTask::s_ViscMaxIter = 35;
@@ -1522,6 +1523,23 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
         Force += m_dForceRate;
         Mi    += m_dMomentRate;
     }
+    // The thickness' impulse of the point, by the derivatives' rule (PanelAnalysis::addThicknessImpulse()): Kirchhoff's steady force and moment of the
+    // point's state (PanelAnalysis::thicknessImpulseLoad()), so that a point with sideslip or rates differs from the point without by the derivatives times
+    // beta and the rates (Cn(beta) = Cn0 + Cnb beta to first order) and the polar's Cm has the slope of Cma. On thick triangle surfaces the pressure moment
+    // carries the impulse of the point without sideslip and rates (its Munk pitching moment), and only the change from it is added; on the thin sheet's
+    // methods all of it (its force is zero without rates: a translation has none).
+    {
+        Vector3d F1, G1, F0, G0;
+        bool const bPressures = m_pPA->pressuresCarryThickness();
+        if(!m_pPA->thicknessMass().empty() && (!bPressures || fabs(beta)>0.0 || m_PointOmega.norm()>0.0))
+        {
+            m_pPA->thicknessImpulseLoad(objects::windDirection(alpha, beta)*QInf, m_PointOmega, CoG, F1, G1);
+            if(bPressures) m_pPA->thicknessImpulseLoad(objects::windDirection(alpha, 0.0)*QInf, Vector3d(), CoG, F0, G0);
+            double const qDyn = 0.5*m_pPlPolar->density()*QInf*QInf;
+            Force += (F1-F0) * (1.0/qDyn);     // N/q
+            Mi    += (G1-G0) * (1.0/qDyn);     // N.m/q
+        }
+    }
     m_AF.setFff(Force);          // N/q, body axes
     m_AF.setMi(Mi);
 
@@ -2188,6 +2206,10 @@ bool PlaneTask::T123458Loop()
         // a point with body rates is a steady rotating state: solved at its own speed, with the local onset flow (solveRatePoint());
         // the other points are solved at unit speed and scaled
         bool const bRates = t8opp.hasRates();
+        {
+            double const ca = cos(t8opp.alpha()*PI/180.0), sa = sin(t8opp.alpha()*PI/180.0);
+            m_PointOmega = bRates ? Vector3d(-ca, 0.0, -sa)*t8opp.p() + Vector3d(0.0, 1.0, 0.0)*t8opp.q() + Vector3d(sa, 0.0, -ca)*t8opp.r() : Vector3d();
+        }
         bool const bSlip = !bRates && t8opp.beta()!=0.0 && sideslipModelApplies();
         m_bRatePoint = bRates || bSlip;
         for(SpanDistribs &sd : m_SpanDistFF) sd.m_VOnset.clear();
@@ -2322,6 +2344,7 @@ bool PlaneTask::T123458Loop()
         traceStdLog(str);
         PlaneOpp *pPOpp = computePlane(m_Ctrl, m_Alpha, m_Beta, m_pPlPolar->phi(), m_QInf, mass, CoG, false);
         m_bRatePoint = false;
+        m_PointOmega.set(0.0, 0.0, 0.0);
         if(!pPOpp)
         {
             traceStdLog("\n          Error generating the operating point... discarding\n\n");
@@ -2434,9 +2457,6 @@ bool PlaneTask::applySideslipModel(double alpha, double beta, double Q, Vector3d
     // Thick surfaces: the point's moment is the on-body pressure moment, without a leading-edge force, so the plain model's change it carries is that of the
     // pressures (OA-OE), not that of the strips (MA-ME); with it the point's moment changes by the sideslip model's (MB-MD), as the derivatives
     if(pPA->hasThickSurfaces()) m_dMomentRate = ((MB-MD) - (OA-OE)) * (1.0/qDyn);     // N.m/q
-    // and, as the derivatives, the change of the thickness' Munk moment, -U x (M_t U) (PanelAnalysis::addThicknessImpulse()), which the lifting model on the
-    // mean surface has not and the pressures' change (OA-OE) took out
-    if(pPA->hasThickSurfaces()) m_dMomentRate += (pPA->thicknessMunkMoment(V) - pPA->thicknessMunkMoment(V0)) * (1.0/qDyn);     // N.m/q
     return true;
 }
 
@@ -3388,6 +3408,63 @@ void PlaneTask::getVelocityVector(Vector3d const &C, double coreradius, bool bMu
 }
 
 
+/**
+ * The added masses of the plane for a run of the thin sheet's methods (thin triangle surfaces, VLM), whose own mesh has no thickness: the thickness is a
+ * property of the geometry, not of the lifting model. The plane's thick triangle mesh (the same sections and foils, flaps at the polar's zero, the bank
+ * angle's rotation) is solved for the six unit motions with TRIUNIFORM's Dirichlet matrix, no wake (P3Analysis::computeAddedMass()), once per task, and
+ * the tensors handed to the run's analysis (PanelAnalysis::takeAddedMass()). Not derived, with the reason: a plane that is not made of wings and sections,
+ * a foil with no thickness (a flat plate: its surface has no inside), a thick mesh that does not connect or close.
+ * Cost: the thick mesh's influence matrix, its unit right-hand sides and one LU factorisation, measured (4 threads): 7.1 s on an elliptic AR 10 wing
+ * of 7536 thick triangles against 3.9 s for its whole VLM2 run, 3.9 s against 2.2 s on a swept flying wing, 1.6 s against 1.0 s on a small three-surface
+ * plane: more than the lattice's own solve, which is why it can be switched off (setAddedMass()).
+ */
+void PlaneTask::makeThicknessFromThickMesh()
+{
+    m_bThicknessMade = true;
+    PlaneXfl const *pPlaneXfl = dynamic_cast<PlaneXfl const*>(m_pPlane);
+    if(!pPlaneXfl) {m_pPA->takeAddedMass(nullptr, "the plane is not made of wings and sections"); return;}
+    for(int iw=0; iw<pPlaneXfl->nWings(); iw++)
+    {
+        WingXfl const *pWing = pPlaneXfl->wingAt(iw);
+        if(!pWing) continue;
+        for(int is=0; is<pWing->nSections(); is++)
+            for(std::string const &name : {pWing->rightFoilName(is), pWing->leftFoilName(is)})
+            {
+                Foil const *pFoil = Objects2d::foil(name);
+                if(pFoil && pFoil->maxThickness()<=0.0)
+                {
+                    m_pPA->takeAddedMass(nullptr, "the foil " + name + " has no thickness");
+                    return;
+                }
+            }
+    }
+    if(pPlaneXfl->hasFuse()) {m_pPA->takeAddedMass(nullptr, "a fuselage has no mean surface to split its potential about"); return;}
+
+    PlaneXfl thick(*pPlaneXfl);
+    thick.makePlane(true, false, true, false);
+    thick.restoreMesh();
+    std::string out;
+    thick.setFlaps(m_pPlPolar, 0.0, out);
+    if(!thick.connectTriMesh(true, false, true)) {m_pPA->takeAddedMass(nullptr, "the plane's thick mesh does not connect"); return;}
+    if(fabs(m_pPlPolar->phi())>AOAPRECISION) thick.triMesh().rotate(0, 0, m_pPlPolar->phi());
+
+    PlanePolar polar;
+    polar.copy(m_pPlPolar);
+    polar.setThinSurfaces(false);
+    polar.setAnalysisMethod(xfl::TRIUNIFORM);
+    polar.setBoundaryCondition(xfl::DIRICHLET);
+
+    P3UniAnalysis pa;
+    pa.setTriMesh(thick.triMesh());
+    if(!pa.initializeAnalysis(&polar, 1)) {m_pPA->takeAddedMass(nullptr, "the plane's thick mesh could not be allocated"); return;}
+    pa.makeUnitRHSVectors();
+    pa.makeInfluenceMatrix();
+    if(pa.m_bMatrixError) {m_pPA->takeAddedMass(nullptr, "numerical error in the thick mesh's influence matrix"); return;}
+    pa.computeAddedMass();
+    m_pPA->takeAddedMass(&pa, "");
+}
+
+
 bool PlaneTask::setLinearSolution()
 {
     std::string strange;
@@ -3424,18 +3501,18 @@ bool PlaneTask::setLinearSolution()
     }
     if (isCancelled()) return true;
 
-    if(!m_pPlPolar->isVLM())
-    {
-        // the added masses of the closed surfaces, from the matrix before the wake is added (P3Analysis::computeAddedMass())
-        traceStdLog("   Making the added masses...");
-        m_pPA->computeAddedMass();
-        end = std::chrono::system_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        start = end;
-        if(m_pPA->addedMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->addedMassReason());
-        else                           strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
-        traceStdLog(strange);
-    }
+    // the added masses: of the closed surfaces of a thick triangle run, from its matrix before the wake is added (P3Analysis::computeAddedMass()); of the
+    // thick mesh of the same plane for the thin sheet's methods, once (makeThicknessFromThickMesh())
+    traceStdLog("   Making the added masses...");
+    if(!s_bAddedMass) m_pPA->takeAddedMass(nullptr, "not requested");
+    else if(m_pPA->pressuresCarryThickness()) m_pPA->computeAddedMass();
+    else if(!m_bThicknessMade) makeThicknessFromThickMesh();
+    end = std::chrono::system_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    start = end;
+    if(m_pPA->thicknessMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->thicknessReason());
+    else                               strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
+    traceStdLog(strange);
     if (isCancelled()) return true;
 
     if(!m_pPlPolar->isVLM())

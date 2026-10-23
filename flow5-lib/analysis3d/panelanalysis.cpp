@@ -233,6 +233,24 @@ bool PanelAnalysis::solveDense(std::vector<double> &A, int n, std::vector<double
 }
 
 
+/** Takes the added masses that another analysis made (PlaneTask::makeThicknessFromThickMesh()), or, with pFrom null, none, for the reason given. */
+void PanelAnalysis::takeAddedMass(PanelAnalysis const *pFrom, std::string const &reason)
+{
+    m_AddedMass.clear();
+    m_ThicknessMass.clear();
+    m_ThicknessReason.clear();
+    m_AddedMassAsymmetry = 0.0;
+    m_AddedMassReason = reason;
+    if(!pFrom) return;
+    m_AddedMass          = pFrom->m_AddedMass;
+    m_ThicknessMass      = pFrom->m_ThicknessMass;
+    m_AddedMassRef       = pFrom->m_AddedMassRef;
+    m_AddedMassAsymmetry = pFrom->m_AddedMassAsymmetry;
+    m_AddedMassReason    = pFrom->m_AddedMassReason;
+    m_ThicknessReason    = pFrom->m_ThicknessReason;
+}
+
+
 /** No added masses outside the triangle methods' thick surfaces (P3Analysis::computeAddedMass()). */
 void PanelAnalysis::computeAddedMass()
 {
@@ -244,7 +262,58 @@ void PanelAnalysis::computeAddedMass()
 
 
 /**
- * Kirchhoff's force and moment of the thickness' impulse in the derivatives taken from the strips' load (Lamb, Hydrodynamics, 6th ed., 1932, secs. 121-124).
+ * Whether the run's own loads carry the thickness: the thick surfaces of the triangle methods, whose on-body pressure moment is the closed surface's
+ * whole potential flow. The thin sheet's loads (thin triangle surfaces, the vortex lattice) and the strips' loads of thick surfaces (the lifting vorticity
+ * on the mean surface) have none of it.
+ */
+bool PanelAnalysis::pressuresCarryThickness() const
+{
+    return m_pPolar3d && m_pPolar3d->isTriangleMethod() && hasThickSurfaces();
+}
+
+
+/** The thickness' tensor m_ThicknessMass (over rho) about CoG: the motion about CoG (U, Omega) is the motion (U + Omega x (CoG - ref), Omega) about the
+ *  reference point, and the angular impulse about CoG is L + (ref - CoG) x P; Mc = T^t M T. False where the tensor is not derived. */
+bool PanelAnalysis::thicknessMassAbout(Vector3d const &CoG, double Mc[6][6]) const
+{
+    if(m_ThicknessMass.size()!=36) return false;
+    Vector3d const d = m_AddedMassRef - CoG;
+    double Tm[6][6] = {};
+    for(int i=0; i<6; i++) Tm[i][i] = 1.0;
+    double const sk[3][3] = {{0.0, -d.z, d.y}, {d.z, 0.0, -d.x}, {-d.y, d.x, 0.0}};
+    for(int i=0; i<3; i++) for(int j=0; j<3; j++) Tm[i][3+j] = -sk[i][j];      // U_ref = U_cog - [d]x Omega
+    double M[6][6], W[6][6] = {};
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) M[i][j] = m_ThicknessMass[size_t(6*i+j)];
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) for(int k=0; k<6; k++) W[i][j] += M[i][k]*Tm[k][j];          // M T
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) Mc[i][j] = 0.0;
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) for(int k=0; k<6; k++) Mc[i][j] += Tm[k][i]*W[k][j];        // T^t M T
+    return true;
+}
+
+
+/**
+ * Kirchhoff's steady force F and moment G (N, N.m, geometry axes, about CoG) of the thickness' impulse on the plane in the state of an air velocity V
+ * relative to its CoG and a rotation Omega of the plane (geometry axes; the onset at r is V + (r - CoG) x Omega): F = -rho Omega x P,
+ * G = -rho (U x P + Omega x L), U = -V, (P, L) = M_t (U, Omega) about CoG (addThicknessImpulse()). Zero where the tensor is not derived.
+ */
+void PanelAnalysis::thicknessImpulseLoad(Vector3d const &V, Vector3d const &Omega, Vector3d const &CoG, Vector3d &F, Vector3d &G) const
+{
+    F.set(0.0, 0.0, 0.0);
+    G.set(0.0, 0.0, 0.0);
+    double Mc[6][6];
+    if(!m_pPolar3d || !thicknessMassAbout(CoG, Mc)) return;
+    Vector3d const U = V * (-1.0);
+    double xi[6] = {U.x, U.y, U.z, Omega.x, Omega.y, Omega.z}, out[6] = {};
+    for(int i=0; i<6; i++) for(int j=0; j<6; j++) out[i] += Mc[i][j]*xi[j];
+    Vector3d const P(out[0], out[1], out[2]), L(out[3], out[4], out[5]);
+    double const rho = m_pPolar3d->density();
+    F = (Omega * P) * (-rho);
+    G = (U * P + Omega * L) * (-rho);
+}
+
+
+/**
+ * Kirchhoff's force and moment of the thickness' impulse in the derivatives (Lamb, Hydrodynamics, 6th ed., 1932, secs. 121-124).
  *
  * A body moving with the velocity U of its reference point and turning at Omega through fluid at rest, the fluid's impulse P (linear) and L (angular, about
  * that point), feels F = -(dP/dt + Omega x P) and G = -(dL/dt + Omega x L + U x P), body axes. Steady, about the steady flight U0 = (u0, 0, 0), Omega0 = 0,
@@ -255,50 +324,22 @@ void PanelAnalysis::computeAddedMass()
  * Yr = -rho u0 m11 (the side force of the yaw rate), Nv = rho u0 (m11 - m22) (Munk's yawing moment), Zq = rho u0 m11 and, with the CoG off the
  * axes of the tensor, the couplings of the translations and the rotations (Np = -rho u0 (m24 + m15), Lr = rho u0 m15, Nr = -rho u0 m26).
  *
- * Which derivatives take it: those whose force or moment is the strips' load (the far-field and Kutta-Joukowski strip forces, their moment, the strips'
- * lift pressure cell by cell): Xq, Zq; Yv, Lv, Nv; Yp, Lp, Np; Yr, Lr, Nr. The lifting model there is the mean surface's (the lift's vorticity), which
- * has no thickness. Xu, Zu, Xw, Zw, Yv take it too, and it is zero: a translation has no force from the impulse (dOmega = 0). Not Mu, Mw and Mq: they
- * are the pressure moment (Mq with the strips' own pressures about their quarter-chord points), and the pressures of the closed surface carry its
- * whole potential flow, the thickness' included. Not the control derivatives: a deflection is not a motion.
+ * The rule: a derivative takes the term unless the load it is taken from is the closed surface's own pressures (pressuresCarryThickness()). On the thin
+ * sheet's methods (thin triangle surfaces, VLM) that is every derivative: their loads have no thickness, and the tensor is made on the thick mesh of the
+ * same plane (PlaneTask::makeThicknessFromThickMesh()). On thick triangle surfaces Mu, Mw and Mq are the pressure moment (Mq with the strips' own
+ * pressures about their quarter-chord points) and do not take it; the others are the strips' load (the far-field and Kutta-Joukowski strip forces, their
+ * moment, the strips' lift pressure cell by cell), whose lifting model on the mean surface has no thickness, and take it. In Xu, Zu, Xw, Zw and Yv the
+ * term is zero by the derivation: a translation has no force from the impulse (dOmega = 0). Not the control derivatives: a deflection is not a motion.
  *
  * Limits: potential flow. How much of the impulse a real wing's flow keeps is not measured; on bodies of revolution the part on a closing afterbody is
- * lost to the boundary layer. The steady points with rates (type 8) do not carry it.
+ * lost to the boundary layer.
  */
-/**
- * The moment (N.m, geometry axes) of the thickness' impulse on the plane in the steady translation of an air velocity V relative to it (the plane moving at
- * -V): Kirchhoff's -U x P with P = M_t U, the translational block of m_ThicknessMass (addThicknessImpulse()): Munk's moment, the same about any point.
- * Zero where the tensor is not derived.
- */
-Vector3d PanelAnalysis::thicknessMunkMoment(Vector3d const &V) const
-{
-    if(m_ThicknessMass.size()!=36 || !m_pPolar3d) return Vector3d();
-    Vector3d const U = V * (-1.0);
-    Vector3d P(m_ThicknessMass[0]*U.x  + m_ThicknessMass[1]*U.y  + m_ThicknessMass[2]*U.z,
-               m_ThicknessMass[6]*U.x  + m_ThicknessMass[7]*U.y  + m_ThicknessMass[8]*U.z,
-               m_ThicknessMass[12]*U.x + m_ThicknessMass[13]*U.y + m_ThicknessMass[14]*U.z);
-    return (U * P) * (-m_pPolar3d->density());
-}
-
-
 void PanelAnalysis::addThicknessImpulse(double alphaeq, double u0, Vector3d const &CoG, StabDerivatives &SD) const
 {
     SD.Impulse.clear();
-    if(m_ThicknessMass.size()!=36 || !m_pPolar3d) return;
+    double Mc[6][6];
+    if(!m_pPolar3d || !thicknessMassAbout(CoG, Mc)) return;
     double const rho = m_pPolar3d->density();
-
-    // the tensor about the CoG: the motion about the CoG (U, Omega) is the motion (U + Omega x (CoG - ref), Omega) about the reference point, and the
-    // angular impulse about the CoG is L + (ref - CoG) x P
-    Vector3d const d = m_AddedMassRef - CoG;
-    double Tm[6][6] = {};
-    for(int i=0; i<6; i++) Tm[i][i] = 1.0;
-    // U_ref = U_cog - [d]x Omega with d = ref - CoG
-    double const sk[3][3] = {{0.0, -d.z, d.y}, {d.z, 0.0, -d.x}, {-d.y, d.x, 0.0}};
-    for(int i=0; i<3; i++) for(int j=0; j<3; j++) Tm[i][3+j] = -sk[i][j];
-    double M[6][6], W[6][6] = {};
-    for(int i=0; i<6; i++) for(int j=0; j<6; j++) M[i][j] = m_ThicknessMass[size_t(6*i+j)];
-    for(int i=0; i<6; i++) for(int j=0; j<6; j++) for(int k=0; k<6; k++) W[i][j] += M[i][k]*Tm[k][j];          // M T
-    double Mc[6][6] = {};
-    for(int i=0; i<6; i++) for(int j=0; j<6; j++) for(int k=0; k<6; k++) Mc[i][j] += Tm[k][i]*W[k][j];        // T^t M T
 
     // stability axes: the rows of R are is, js, ks in geometry axes
     double const ca = cos(alphaeq*PI/180.0), sa = sin(alphaeq*PI/180.0);
@@ -329,16 +370,18 @@ void PanelAnalysis::addThicknessImpulse(double alphaeq, double u0, Vector3d cons
         dF *= rho;
         dG *= rho;
     };
+    bool const bPressureMoments = pressuresCarryThickness();
     Vector3d dF, dG;
-    perturb(Vector3d(1,0,0), O0, dF, dG);  SD.Impulse["Xu"] = dF.x;  SD.Impulse["Zu"] = dF.z;
-    perturb(Vector3d(0,0,1), O0, dF, dG);  SD.Impulse["Xw"] = dF.x;  SD.Impulse["Zw"] = dF.z;
-    perturb(O0, Vector3d(0,1,0), dF, dG);  SD.Impulse["Xq"] = dF.x;  SD.Impulse["Zq"] = dF.z;
+    perturb(Vector3d(1,0,0), O0, dF, dG);  SD.Impulse["Xu"] = dF.x;  SD.Impulse["Zu"] = dF.z;  if(!bPressureMoments) SD.Impulse["Mu"] = dG.y;
+    perturb(Vector3d(0,0,1), O0, dF, dG);  SD.Impulse["Xw"] = dF.x;  SD.Impulse["Zw"] = dF.z;  if(!bPressureMoments) SD.Impulse["Mw"] = dG.y;
+    perturb(O0, Vector3d(0,1,0), dF, dG);  SD.Impulse["Xq"] = dF.x;  SD.Impulse["Zq"] = dF.z;  if(!bPressureMoments) SD.Impulse["Mq"] = dG.y;
     perturb(Vector3d(0,1,0), O0, dF, dG);  SD.Impulse["Yv"] = dF.y;  SD.Impulse["Lv"] = dG.x;  SD.Impulse["Nv"] = dG.z;
     perturb(O0, Vector3d(1,0,0), dF, dG);  SD.Impulse["Yp"] = dF.y;  SD.Impulse["Lp"] = dG.x;  SD.Impulse["Np"] = dG.z;
     perturb(O0, Vector3d(0,0,1), dF, dG);  SD.Impulse["Yr"] = dF.y;  SD.Impulse["Lr"] = dG.x;  SD.Impulse["Nr"] = dG.z;
 
     SD.Xu += SD.Impulse["Xu"];  SD.Zu += SD.Impulse["Zu"];  SD.Xw += SD.Impulse["Xw"];  SD.Zw += SD.Impulse["Zw"];
     SD.Xq += SD.Impulse["Xq"];  SD.Zq += SD.Impulse["Zq"];
+    if(!bPressureMoments) {SD.Mu += SD.Impulse["Mu"];  SD.Mw += SD.Impulse["Mw"];  SD.Mq += SD.Impulse["Mq"];}
     SD.Yv += SD.Impulse["Yv"];  SD.Lv += SD.Impulse["Lv"];  SD.Nv += SD.Impulse["Nv"];
     SD.Yp += SD.Impulse["Yp"];  SD.Lp += SD.Impulse["Lp"];  SD.Np += SD.Impulse["Np"];
     SD.Yr += SD.Impulse["Yr"];  SD.Lr += SD.Impulse["Lr"];  SD.Nr += SD.Impulse["Nr"];

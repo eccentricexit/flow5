@@ -2581,6 +2581,11 @@ double P4Analysis::computeCm(Vector3d const &CoG, double Alpha, bool bFuseMi)
         }
     }
 
+    // the thickness' Munk pitching moment, which the lattice's load has not (PanelAnalysis::thicknessImpulseLoad()), as the points carry it
+    Vector3d Fk, Gk;
+    thicknessImpulseLoad(WindDirection, Vector3d(), CoG, Fk, Gk);
+    if(m_pPolar3d) Cm += Gk.y/(0.5*m_pPolar3d->density());     // N.m/q at a unit speed
+
     return Cm;
 }
 

@@ -2352,6 +2352,15 @@ double P3Analysis::computeCm(Vector3d const &CoG, double Alpha, bool bFuseMi)
     Vector3d Force, Moment;
     forces(m_Mu.data(), m_Sigma.data(), Alpha, beta, CoG, bFuseMi, VInf, Force, Moment);
 
+    // the thin sheet's moment has not the thickness' Munk pitching moment, which the points carry (PanelAnalysis::thicknessImpulseLoad()); the thick
+    // surfaces' pressure moment has it
+    if(!pressuresCarryThickness())
+    {
+        Vector3d Fk, Gk;
+        thicknessImpulseLoad(WindDirection, Vector3d(), CoG, Fk, Gk);
+        Moment += Gk;
+    }
+
     return 2.0 * Moment.y;      // forces() has the dynamic pressure of a unit speed, N.m
 }
 

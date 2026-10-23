@@ -148,6 +148,10 @@ void StabDerivatives::computeNDStabDerivatives()
         ImpulseND["CYb"] = I("Yv")*u0/(q*S);               ImpulseND["CYp"] = I("Yp")*2.*u0/(q*S*b);         ImpulseND["CYr"] = I("Yr")*2.*u0/(q*S*b);
         ImpulseND["Clb"] = I("Lv")*u0/(q*S*b);             ImpulseND["Clp"] = I("Lp")*(2.*u0/b)/(q*S*b);     ImpulseND["Clr"] = I("Lr")*(2.*u0/b)/(q*S*b);
         ImpulseND["Cnb"] = I("Nv")*u0/(q*S*b);             ImpulseND["Cnp"] = I("Np")*(2.*u0/b)/(q*S*b);     ImpulseND["Cnr"] = I("Nr")*(2.*u0/b)/(q*S*b);
+        if(Impulse.count("Mw"))     // the thin sheet's methods only (PanelAnalysis::addThicknessImpulse())
+        {
+            ImpulseND["Cmu"] = I("Mu")/(0.5*m_rho*u0*mac*S);   ImpulseND["Cma"] = I("Mw")/(0.5*m_rho*u0*mac*S);  ImpulseND["Cmq"] = I("Mq")/(.25*m_rho*u0*mac*mac*S);
+        }
     }
 
     CXe.resize(Xde.size());
