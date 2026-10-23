@@ -25,6 +25,9 @@
 
 #pragma once
 
+#include <map>
+#include <string>
+
 #include <vector>
 #include <string>
 
@@ -59,6 +62,8 @@ class FL5LIB_EXPORT StabDerivatives
         double Zwp, Mwp;                          //second order derivatives, cannot be calculated by a panel method, set to zero.
         // lateral
         double Yv, Yp, Yr, Lv, Lp, Lr, Nv, Np, Nr;//first order
+        std::map<std::string, double> Impulse;     /**< the thickness' impulse in the derivatives above (PanelAnalysis::addThicknessImpulse()), each one's dimensional part; empty where it is not derived */
+        std::map<std::string, double> ImpulseND;   /**< the same, nondimensional, by the names of the nondimensional derivatives (computeNDStabDerivatives()) */
 
         // control derivatives
 

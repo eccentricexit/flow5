@@ -86,6 +86,10 @@ class FL5LIB_EXPORT PlaneTask : public Task3d
         static double maxViscError() {return s_ViscAlphaPrecision;}
         static double viscRelaxFactor() {return s_ViscRelax;}
         static bool bViscInitVTwist() {return s_bViscInitTwist;}
+        /** Whether the added masses of the plane are made (P3Analysis::computeAddedMass(), makeThicknessFromThickMesh()), and so the thickness' impulse in
+         *  the derivatives and the points; default true. Off, the analysis' reason is "not requested". */
+        static void setAddedMass(bool b) {s_bAddedMass=b;}
+        static bool bAddedMass() {return s_bAddedMass;}
         static void setViscInitVTwist(bool bInit) {s_bViscInitTwist=bInit;}
 
     private:
@@ -147,6 +151,9 @@ class FL5LIB_EXPORT PlaneTask : public Task3d
 
         std::vector<double> m_AngleList, m_T6CtrlList, m_T7CtrlList;   /**< The list of operating points to analyze for each polar type*/
         std::vector<T8Opp> m_T8Opps;
+        Vector3d m_PointOmega;              /**< the rotation of the plane (rad/s, geometry axes) of the point computePlane() is making: a type-8 point's rates, zero otherwise */
+        bool m_bThicknessMade = false;      /**< true once makeThicknessFromThickMesh() has run for this task */
+        void makeThicknessFromThickMesh();
         bool m_bRatePoint = false;          /**< true while a point with body rates or, on thin triangle methods, with sideslip is computed: computePlane() then adds m_dForceRate and m_dMomentRate */
         std::vector<double> m_slipSol;      /**< the doublet solution of a point without rates but with sideslip, with the yawed wake's change (unit speed) */
         Vector3d m_dForceRate;              /**< the change of the far-field force (N/q, body axes) that the sideslip model of the derivatives makes to a rotating point with sideslip */
@@ -167,6 +174,7 @@ class FL5LIB_EXPORT PlaneTask : public Task3d
 
     private:
         static bool s_bViscInitTwist;
+        static bool s_bAddedMass;
         static double s_ViscRelax;
         static double s_ViscAlphaPrecision;
         static int s_ViscMaxIter;

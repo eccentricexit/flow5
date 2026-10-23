@@ -28,6 +28,8 @@
 #include <format>
 #include <thread>
 #include <array>
+#include <map>
+#include <algorithm>
 
 
 #include <p3analysis.h>
@@ -660,9 +662,9 @@ bool P3Analysis::stripSuctionFrame(Panel3 const &p3, Vector3d &n, Vector3d &e, V
  * Nothing is chosen along the chord. Thick strips take the same with FP the pressure force of their lift (thickStripLiftPressureForce(): the panel forces
  * projected on the mean surface's normal, cell by cell), so that their suction, which their pressures carry in the plane of the mean surface, is directed
  * as a thin strip's. With the whole pressure force instead (flow5#30) a thick strip's span component took the thickness' own pressures as well: the
- * fluid's impulse turned by a yaw rate, -Omega x (M_a V) (Kirchhoff; Lamb, Hydrodynamics, sec. 124), which the thin sheet and AVL have not, and only the
- * part of it on the strips' spanwise slopes, not on the tips (flow5#31: CYr of an elliptic NACA 0012 wing -0.0057 against -0.0009 thin, of the
- * rectangular one the thin's). Returns the change, along e.
+ * fluid's impulse turned by a yaw rate, -Omega x (M_a V) (Kirchhoff; Lamb, Hydrodynamics, sec. 124), and only the part of it on the strips' spanwise
+ * slopes, not on the tips (flow5#31: CYr of an elliptic NACA 0012 wing -0.0057 against -0.0009 thin, of the rectangular one the thin's). The whole of
+ * that impulse is added to the derivatives from the thickness' added masses (PanelAnalysis::addThicknessImpulse()). Returns the change, along e.
  * forces() applies it in rotating states only (m_bRotationSuction): without rotation the strips' far-field force is exact in total.
  */
 Vector3d P3Analysis::stripSuctionCorrection(Panel3 const &p3, Vector3d const &F, Vector3d const &FP) const
@@ -856,6 +858,290 @@ bool P3Analysis::hasThickSurfaces() const
     for(Panel3 const &p3 : m_Panel3)
         if(p3.isTrailing() && p3.isBotPanel()) return true;
     return false;
+}
+
+
+/**
+ * Whether the panels form closed surfaces: every edge of every triangle is shared by exactly two triangles, two nodes being one where they lie within a
+ * thousandth of the mesh's shortest edge of each other (a distinct node is never that close). False, with the reason, where an edge bounds one triangle only
+ * (an open tip or root with no closing patch, meshes of two surfaces that do not meet edge to edge) or is shared by more than two (surfaces that cross).
+ * A foil whose trailing edge has a gap still meshes closed: Surface::makeSideNodes() merges its top and bottom trailing nodes at their midpoint, so the
+ * mesh pinches the gap over the last panel (measured: a NACA 0012 wing with a 2.8 percent gap has an m11 3 percent above that of the closed foil, the
+ * blunter last panel; with the 0.25 percent gap of the standard 4-digit section, 0.05 percent).
+ */
+bool P3Analysis::closedSurfaceCheck(std::string &reason) const
+{
+    reason.clear();
+    int maxIndex = -1;
+    double hmin = -1.0;
+    for(Panel3 const &p3 : m_Panel3)
+    {
+        for(int k=0; k<3; k++)
+        {
+            maxIndex = std::max(maxIndex, p3.vertexAt(k).index());
+            double h = (p3.vertexAt(k+1)-p3.vertexAt(k)).norm();
+            if(h>0.0 && (hmin<0.0 || h<hmin)) hmin = h;
+        }
+    }
+    if(maxIndex<0 || hmin<=0.0)
+    {
+        reason = "the mesh has no triangles";
+        return false;
+    }
+    double const tol = 1.0e-3*hmin;
+
+    std::vector<Vector3d> pos(maxIndex+1);
+    std::vector<char> used(maxIndex+1, 0);
+    for(Panel3 const &p3 : m_Panel3)
+        for(int k=0; k<3; k++) {pos[p3.vertexAt(k).index()] = p3.vertexAt(k); used[p3.vertexAt(k).index()] = 1;}
+
+    std::vector<int> parent(maxIndex+1);
+    for(int i=0; i<=maxIndex; i++) parent[i] = i;
+    auto find = [&](int a){while(parent[a]!=a){parent[a]=parent[parent[a]]; a=parent[a];} return a;};
+    std::vector<int> order;
+    for(int i=0; i<=maxIndex; i++) if(used[i]) order.push_back(i);
+    std::sort(order.begin(), order.end(), [&](int a, int b){return pos[a].x<pos[b].x;});
+    for(unsigned i=0; i<order.size(); i++)
+        for(unsigned j=i+1; j<order.size() && pos[order[j]].x-pos[order[i]].x<tol; j++)
+            if((pos[order[j]]-pos[order[i]]).norm()<tol) parent[find(order[j])] = find(order[i]);
+
+    std::map<std::pair<int,int>, int> edges;
+    std::map<std::pair<int,int>, int> edgePanel;
+    for(int i3=0; i3<nPanels(); i3++)
+    {
+        Panel3 const &p3 = m_Panel3.at(i3);
+        for(int k=0; k<3; k++)
+        {
+            int a = find(p3.vertexAt(k).index()), b = find(p3.vertexAt(k+1).index());
+            if(a==b) continue;   // a null edge of a degenerate triangle
+            std::pair<int,int> e(std::min(a,b), std::max(a,b));
+            edges[e]++;
+            edgePanel[e] = i3;
+        }
+    }
+    int nOpen = 0, nTrailing = 0, nShared = 0;
+    for(auto const &e : edges)
+    {
+        if(e.second==1)
+        {
+            nOpen++;
+            Panel3 const &p3 = m_Panel3.at(edgePanel[e.first]);
+            if(p3.isTrailing() && !p3.isSidePanel()) nTrailing++;
+        }
+        else if(e.second>2) nShared++;
+    }
+    if(nOpen==0 && nShared==0) return true;
+    if(nOpen>0 && nTrailing==nOpen)
+        reason = std::format("the thick surfaces are not closed: {} edges along the trailing edges bound one triangle only (a foil with a trailing-edge gap, "
+                             "whose top and bottom trailing nodes are apart with no base panel between them)", nOpen);
+    else if(nOpen>0)
+        reason = std::format("the thick surfaces are not closed: {} edges bound one triangle only ({} of them along the trailing edges; the others an open "
+                             "tip or root, or surfaces whose meshes do not meet edge to edge)", nOpen, nTrailing);
+    else
+        reason = std::format("the thick surfaces cross: {} edges are shared by more than two triangles", nShared);
+    return false;
+}
+
+
+/**
+ * The added-mass tensor M of the closed thick surfaces: the impulse of the fluid that a body moving through it at rest carries, P = M_tt U + M_tr Omega,
+ * L = M_rt U + M_rr Omega (Lamb, Hydrodynamics, 6th ed., 1932, secs. 117-124), U the velocity of the reference point m_AddedMassRef (the polar's CoG)
+ * and Omega the rotation, geometry axes. Called with the influence matrix of the surfaces alone, before the wake's columns are added: the acyclic problem,
+ * no circulation.
+ *
+ * Derivation, and its signs. With n the normal out of the body and phi_j the potential of the unit motion j (dphi_j/dn = n_j, n_j = n for the
+ * translations and (r - CoG) x n for the rotations), the fluid's kinetic energy is T = -1/2 rho int phi dphi/dn dA (Green's theorem over the fluid, whose
+ * outward normal on the body is -n), so that M_ij / rho = -int phi_j n_i dA. The unit right-hand sides are the onsets of a body at rest, e_j for a
+ * translation (m_uRHS, m_vRHS, m_wRHS) and (r - CoG) x e_j for a rotation (m_pRHS, m_qRHS, m_rRHS). The perturbation potential of an onset is the
+ * potential of the body moving through still fluid with the opposite velocity field: a translation +e_j is the onset -e_j, a rotation +e_j the onset
+ * (r - CoG) x e_j. The Dirichlet formulation's unknown is the doublet density mu, whose surface velocity is -4 pi grad mu
+ * (makePanelDoubletSurfaceVelocity()): the perturbation potential is -4 pi mu plus a constant, which adds nothing to M on a closed surface (the integrals
+ * of n and of (r - CoG) x n over it are zero). Hence phi_j = +4 pi mu_j for a translation and -4 pi mu_j for a rotation, mu_j solved for the onset
+ * m_*RHS. Checked: M is positive definite, and its translations meet an independent constant-source panel code (checked against Lamb's ellipsoid)
+ * to 2 percent on m11 and m22 of an elliptic AR 10 NACA 0012 wing; on a rectangular one m22, which its flat tips hold, differs by 5 percent, the two
+ * meshes closing the tips differently (flow5's tip patches against fans). On a closed body the collocated M is symmetric to the discretisation's residual
+ * (m_AddedMassAsymmetry, measured 2e-4 to 5e-4), and it is stored symmetrised.
+ *
+ * M is the whole impulse of the closed surface, the plate's (the lifting problem's) included; the derivatives take the thickness' part of it only
+ * (makeThicknessImpulse()).
+ *
+ * Not derived, with the reason in m_AddedMassReason: thin surfaces (a sheet has no thickness, and the thin sheet's lifting model is the whole of its
+ * potential flow), the Neumann formulation (its doublet density is not the surface potential), surfaces that are not closed (closedSurfaceCheck()):
+ * the integrals above hold on a closed surface only, and on an open one the Dirichlet condition inside the body is not that of the body's own interior.
+ * Cost: one more LU factorisation of the surfaces' matrix and a copy of it (3.4 s against 2.6 s for the analysis' own LU on 7536 triangles, 4 threads).
+ */
+void P3Analysis::computeAddedMass()
+{
+    m_AddedMass.clear();
+    m_ThicknessMass.clear();
+    m_ThicknessReason.clear();
+    m_AddedMassAsymmetry = 0.0;
+    m_AddedMassReason.clear();
+    if(!m_pPolar3d) {m_AddedMassReason = "no analysis"; return;}
+    m_AddedMassRef = m_pPolar3d->CoG();
+
+    for(Panel3 const &p3 : m_Panel3)
+        if(p3.isMidPanel())
+        {
+            m_AddedMassReason = "the surfaces are thin: a sheet has no thickness, and its lifting model is the whole of its potential flow";
+            return;
+        }
+    if(m_pPolar3d->bNeumann())
+    {
+        m_AddedMassReason = "the Neumann formulation's doublet density is not the surface potential";
+        return;
+    }
+    if(!closedSurfaceCheck(m_AddedMassReason)) return;
+
+    int const N = nPanels();
+    int const n = matSize();
+    bool const bLin = m_pPolar3d->isTriLinearMethod();
+    if(n!=(bLin ? 3*N : N)) {m_AddedMassReason = "unexpected matrix size"; return;}
+
+    // the matrix of the surfaces is stored by rows (row*n+col) and LAPACK reads columns: its transpose, column-major, is the copy
+    std::vector<double> A(size_t(n)*size_t(n));
+    for(int r=0; r<n; r++)
+        for(int c=0; c<n; c++)
+            A[size_t(c)*size_t(n)+size_t(r)] = s_bDoublePrecision ? m_aijd[size_t(r)*size_t(n)+size_t(c)] : double(m_aijf[size_t(r)*size_t(n)+size_t(c)]);
+
+    std::vector<double> B(size_t(n)*6);
+    std::vector<double> const *rhs[] = {&m_uRHS, &m_vRHS, &m_wRHS, &m_pRHS, &m_qRHS, &m_rRHS};
+    for(int j=0; j<6; j++)
+        for(int r=0; r<n; r++) B[size_t(j)*size_t(n)+size_t(r)] = rhs[j]->at(r);
+
+    if(!solveDense(A, n, B, 6))
+    {
+        m_AddedMassReason = "the matrix of the surfaces without their wake is singular";
+        return;
+    }
+
+    // the potentials of the six unit motions on the panels
+    std::vector<std::array<double,6>> phi(N);
+    for(int k=0; k<N; k++)
+        for(int j=0; j<6; j++)
+        {
+            double const *mu = B.data() + size_t(j)*size_t(n);
+            double mubar = bLin ? (mu[3*k]+mu[3*k+1]+mu[3*k+2])/3.0 : mu[k];
+            phi[k][j] = (j<3 ? 4.0*PI : -4.0*PI) * mubar;
+        }
+
+    auto integrate = [&](std::vector<std::array<double,6>> const &f, std::array<double, 36> &T)
+    {
+        T.fill(0.0);
+        for(int k=0; k<N; k++)
+        {
+            Panel3 const &p3 = m_Panel3.at(k);
+            Vector3d const nk = p3.normal();
+            Vector3d const rk = (p3.CoG()-m_AddedMassRef) * nk;
+            double const g[6] = {nk.x, nk.y, nk.z, rk.x, rk.y, rk.z};
+            for(int j=0; j<6; j++)
+                for(int i=0; i<6; i++) T[size_t(6*i+j)] -= f[k][j] * g[i] * p3.area();
+        }
+    };
+
+    std::array<double, 36> M{};
+    integrate(phi, M);
+    double mmax = 0.0, amax = 0.0;
+    for(int i=0; i<6; i++)
+        for(int j=0; j<6; j++)
+        {
+            mmax = std::max(mmax, fabs(M[size_t(6*i+j)]));
+            amax = std::max(amax, fabs(M[size_t(6*i+j)]-M[size_t(6*j+i)]));
+        }
+    m_AddedMassAsymmetry = mmax>0.0 ? amax/mmax : 0.0;
+    m_AddedMass.resize(36);
+    for(int i=0; i<6; i++)
+        for(int j=0; j<6; j++) m_AddedMass[size_t(6*i+j)] = 0.5*(M[size_t(6*i+j)]+M[size_t(6*j+i)]);
+
+    makeThicknessImpulse(phi, integrate);
+}
+
+
+/**
+ * The thickness' part of the impulse: m_ThicknessMass, P = M_t xi (xi the six unit motions), from the part of each unit motion's acyclic potential that is
+ * common to facing cells.
+ *
+ * Basis: thin-wing theory splits the potential of a thick surface into the antisymmetric problem about its mean surface, the lifting one, and the
+ * symmetric problem, the thickness' (Katz and Plotkin, Low-Speed Aerodynamics, 2nd ed., 2001, secs. 4.4 and 12.1). The jump between facing cells is the
+ * potential of the lifting sheet, the mean surface's doublet density: that is the plate's problem, which the lifting model carries (the thin sheet's
+ * derivatives, the mean-sheet load of the thick surfaces' sideslip derivatives, meanSheetVorticityLoad(), the cell-by-cell lift pressure of their rate
+ * derivatives, thickStripLiftPressureForce()). Its impulse, the plate's added mass (m33, m35, m44, m55 of a flat wing; the camber's couplings, m13), does
+ * not vanish with the thickness and is in those derivatives already. The common part vanishes with the thickness, as t^2 in the impulse; nothing in the
+ * lifting model carries it.
+ *
+ * Per regular strip (thickStripChain()), per pair of facing cells (bottom cell c, top cell 2 NX - 1 - c): a = (mean phi of the top cell - mean phi of the
+ * bottom cell)/2, area-weighted, is the cell's half jump; the top's panels keep phi - a, the bottom's phi + a. A tip patch (side panels) has no facing cell
+ * and is the thickness' whole: its area goes to zero with the thickness. Then M_t,ij = -int phi_t,j n_i dA. M_t is the impulse of a part of the potential,
+ * not the energy of a motion, and is not symmetric: on a flat symmetric wing it is the in-plane block of the added masses (x, y, the rotation about z)
+ * and the rest is zero; on a cambered section the common part carries a cross term of the camber and the thickness, second order, which is its asymmetry.
+ *
+ * Not derived, the reason in m_ThicknessReason: a fuselage (it has no mean surface), a strip whose mesh is not the regular chain of cells, a top or bottom
+ * panel in no strip.
+ */
+template<typename F>
+void P3Analysis::makeThicknessImpulse(std::vector<std::array<double,6>> const &phi, F const &integrate)
+{
+    m_ThicknessMass.clear();
+    m_ThicknessReason.clear();
+    int const N = nPanels();
+    std::vector<std::array<double,6>> phiT(phi);
+    std::vector<char> done(N, 0);
+    for(int i3=0; i3<N; i3++)
+    {
+        Panel3 const &p3 = m_Panel3.at(i3);
+        if(p3.isFusePanel())
+        {
+            m_ThicknessReason = "a fuselage has no mean surface to split its potential about";
+            return;
+        }
+        if(p3.isSidePanel()) done[i3] = 1;
+        if(!(p3.isTrailing() && p3.isBotPanel())) continue;
+        std::vector<int> chain;
+        int NX = 0, T = 0;
+        if(!thickStripChain(i3, chain, NX, T))
+        {
+            m_ThicknessReason = "a thick strip's mesh is not the regular chain of facing cells";
+            return;
+        }
+        for(int c=0; c<NX; c++)
+        {
+            std::array<double,6> mb{}, mt{};
+            double ab = 0.0, at = 0.0;
+            for(int k=0; k<T; k++)
+            {
+                int ib = chain[T*c+k], it = chain[T*(2*NX-1-c)+k];
+                double Ab = m_Panel3.at(ib).area(), At = m_Panel3.at(it).area();
+                ab += Ab;
+                at += At;
+                for(int j=0; j<6; j++) {mb[j] += phi[ib][j]*Ab; mt[j] += phi[it][j]*At;}
+            }
+            if(ab<=0.0 || at<=0.0)
+            {
+                m_ThicknessReason = "a thick strip has a cell of no area";
+                return;
+            }
+            for(int k=0; k<T; k++)
+            {
+                int ib = chain[T*c+k], it = chain[T*(2*NX-1-c)+k];
+                for(int j=0; j<6; j++)
+                {
+                    double a = 0.5*(mt[j]/at - mb[j]/ab);
+                    phiT[it][j] = phi[it][j] - a;
+                    phiT[ib][j] = phi[ib][j] + a;
+                }
+                done[ib] = done[it] = 1;
+            }
+        }
+    }
+    for(int i3=0; i3<N; i3++)
+        if(!done[i3])
+        {
+            m_ThicknessReason = "a panel of a thick surface belongs to no strip";
+            return;
+        }
+    std::array<double, 36> MT{};
+    integrate(phiT, MT);
+    m_ThicknessMass.assign(MT.begin(), MT.end());
 }
 
 
@@ -2065,6 +2351,15 @@ double P3Analysis::computeCm(Vector3d const &CoG, double Alpha, bool bFuseMi)
 
     Vector3d Force, Moment;
     forces(m_Mu.data(), m_Sigma.data(), Alpha, beta, CoG, bFuseMi, VInf, Force, Moment);
+
+    // the thin sheet's moment has not the thickness' Munk pitching moment, which the points carry (PanelAnalysis::thicknessImpulseLoad()); the thick
+    // surfaces' pressure moment has it
+    if(!pressuresCarryThickness())
+    {
+        Vector3d Fk, Gk;
+        thicknessImpulseLoad(WindDirection, Vector3d(), CoG, Fk, Gk);
+        Moment += Gk;
+    }
 
     return 2.0 * Moment.y;      // forces() has the dynamic pressure of a unit speed, N.m
 }

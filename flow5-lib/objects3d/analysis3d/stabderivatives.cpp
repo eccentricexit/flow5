@@ -56,6 +56,8 @@ void StabDerivatives::reset()
     //Dimensional stability derivatives
     Xu = Xw = Xq = Zu = Zw = Zq = Mu = Mw = Mq = Zwp = Mwp = 0.0;
     Yv = Yp = Yr = Lv = Lp = Lr = Nv = Np = Nr = 0.0;
+    Impulse.clear();
+    ImpulseND.clear();
 
     ControlNames.clear();
     Xde.clear();
@@ -135,6 +137,22 @@ void StabDerivatives::computeNDStabDerivatives()
     Cnb = Nv*    u0     /(q*S*b);
     Cnp = Np*(2.*u0/b)  /(q*S*b);
     Cnr = Nr*(2.*u0/b)  /(q*S*b);
+
+    ImpulseND.clear();
+    if(!Impulse.empty())
+    {
+        auto I = [&](char const *k) {auto it = Impulse.find(k); return it==Impulse.end() ? 0.0 : it->second;};
+        ImpulseND["CXu"] = I("Xu")/(0.5*m_rho*u0*S);       ImpulseND["CZu"] = I("Zu")/(0.5*m_rho*u0*S);
+        ImpulseND["CXa"] = I("Xw")/(0.5*m_rho*u0*S);       ImpulseND["CZa"] = I("Zw")/(0.5*m_rho*u0*S);
+        ImpulseND["CXq"] = I("Xq")/(.25*m_rho*u0*mac*S);   ImpulseND["CZq"] = I("Zq")/(.25*m_rho*u0*mac*S);
+        ImpulseND["CYb"] = I("Yv")*u0/(q*S);               ImpulseND["CYp"] = I("Yp")*2.*u0/(q*S*b);         ImpulseND["CYr"] = I("Yr")*2.*u0/(q*S*b);
+        ImpulseND["Clb"] = I("Lv")*u0/(q*S*b);             ImpulseND["Clp"] = I("Lp")*(2.*u0/b)/(q*S*b);     ImpulseND["Clr"] = I("Lr")*(2.*u0/b)/(q*S*b);
+        ImpulseND["Cnb"] = I("Nv")*u0/(q*S*b);             ImpulseND["Cnp"] = I("Np")*(2.*u0/b)/(q*S*b);     ImpulseND["Cnr"] = I("Nr")*(2.*u0/b)/(q*S*b);
+        if(Impulse.count("Mw"))     // the thin sheet's methods only (PanelAnalysis::addThicknessImpulse())
+        {
+            ImpulseND["Cmu"] = I("Mu")/(0.5*m_rho*u0*mac*S);   ImpulseND["Cma"] = I("Mw")/(0.5*m_rho*u0*mac*S);  ImpulseND["Cmq"] = I("Mq")/(.25*m_rho*u0*mac*mac*S);
+        }
+    }
 
     CXe.resize(Xde.size());
     CYe.resize(Xde.size());
