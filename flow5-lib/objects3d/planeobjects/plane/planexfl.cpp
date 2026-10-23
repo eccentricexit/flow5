@@ -1894,7 +1894,10 @@ void PlaneXfl::rotateFlapNodes(const std::vector<Panel3> &panel3, std::vector<No
  * deflection about the junction's hinge: the flap's end strip and the neighbour's end strip are warped, each taking
  * half of the change, so the slot is closed and the deflected span is unchanged to first order.
  * The copies part in two cases. (1) The two deflections differ. (2) The two hinges are not collinear, as at a dihedral
- * break or where the hinge line bends in plan (a crank in sweep or taper): a node aft of the hinge by r, turned by the
+ * break, where the hinge line bends in plan (a crank in sweep or taper), or at the centre of a swept wing whose flaps
+ * run through it, where the left and right hinges are mirrored (on a 2.3 m swept flying wing with a 0.385 m root chord,
+ * an elevator at 12 deg left the two copies 8 mm apart at the trailing edge, and the centre strip read Cl 1.29 at
+ * alpha 6 where it reads 0.79 sealed): a node aft of the hinge by r, turned by the
  * same angle t about each surface's hinge h_a and h_b, lands at points t (h_a-h_b) x r apart, normal to the surface, so
  * even an equal deflection opens the junction. On a 25 deg break with a 22 deg sweep, a 0.135 m chord, a hinge at 75%
  * chord and t = 4 deg, that is 0.95 mm at the trailing edge, of the order of the trailing-edge panels of a 13-panel
