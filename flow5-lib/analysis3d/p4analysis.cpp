@@ -1035,6 +1035,9 @@ void P4Analysis::VLMGetVortexInfluence(Panel4 const &p4, Vector3d const &C, doub
 *    which leaves out the force of the induced velocity on it, the induced drag and its lever: a wing with dihedral or sweep has one in
 *    pitch (AVL's Cm is the near-field load's, SFFORC). Then Cm, Cma and Cm_de share one model. The forces stay the far-field ones
 *    (rule 2's momentum argument) except in rotation.
+* VLM1 keeps the on-body moment in every state, with the limit above: on a 2.94 m conventional glider (aspect ratio 15, 13 chordwise
+* panels, alpha 2 deg) its Cnp reads -0.003 where VLM2 reads -0.043, and its Cma -1.067 where VLM2 reads -1.114. Its force is the
+* far-field one: each horseshoe of a strip carries its own circulation on its own bound vortex, in the strip's Trefftz-plane wash.
 * @param Mu a pointer to the array of doublet strengths or vortex circulations
 * @param Sigma a pointer to the array of source strengths
 * @param VInf a reference to the array of the velocity vectors on the panels
@@ -1140,23 +1143,23 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
             if(p4.isTrailing())
             {
                 assert(p4.isMidPanel());
-                int pp = i4;
+                // the Trefftz plane sees twice the downwash of the bound vortex: trefftzWash() is half of it;
+                // the strip's panels share its trailing legs, so they share its wash
+                Vector3d WgStrip;
+                if(m_pPolar3d->isVLM2()) WgStrip = trefftzWash(p4.TA(), p4.TB());
+                else                     WgStrip = trefftzWash(p4.m_VA, p4.m_VB);
 
+                int pp = i4;
                 do
                 {
                     Panel4 const &pp4 = m_Panel4.at(pp);
                     if(m_pPolar3d->isVLM1() || pp4.isTrailing())
                     {
-                        // the Trefftz plane sees twice the downwash of the bound vortex: trefftzWash() is half of it
-                        if(m_pPolar3d->isVLM2()) Wg = trefftzWash(p4.TA(), p4.TB());
-                        else                     Wg = trefftzWash(p4.m_VA, p4.m_VB);
-
-                        Wg += VInf.at(i4);
-
-                        //induced force
-                        Vector3d vortex = p4.trailingVortex();
-                        Vector3d dF = Wg * vortex;
-                        dF *= Mu4[i4];           // N/rho
+                        // VLM1: each panel's horseshoe, its circulation on its own bound vortex in the onset at that panel;
+                        // the strip's force is their sum. VLM2: the trailing ring alone, the strip's shed circulation
+                        Wg = WgStrip + VInf.at(pp);
+                        Vector3d dF = Wg * pp4.trailingVortex();
+                        dF *= Mu4[pp];           // N/rho
                         Force += dF;    // N/rho
                     }
                     if(pp4.isLeading()) break; // is the next strip
@@ -1745,8 +1748,8 @@ void P4Analysis::inducedForce(int nPanels, double QInf, double alpha, double bet
 
                         SpanResFF.m_Gamma[m] += Mu4[pp+pos];
 
-                        //induced force
-                        Vector3d dF  = VInf * p4.trailingVortex();
+                        //induced force, on the panel's own bound vortex
+                        Vector3d dF  = VInf * pp4.trailingVortex();
                         dF *= Mu4[pp+pos];       // N/rho
                         stripforce += dF;        // N/rho
                     }
@@ -2029,8 +2032,8 @@ void P4Analysis::trefftzDrag(int nPanels, double QInf, double alpha, double beta
                     // using Wg as the approximate downwash
                     Panel4 const &pp4 = m_Panel4.at(pp+pos);
 
-                    //induced force
-                    Vector3d dF  = Wg * p4.trailingVortex();
+                    //induced force, on the panel's own bound vortex
+                    Vector3d dF  = Wg * pp4.trailingVortex();
                     dF *= Mu4[pp+pos];       // N/rho
                     stripforce += dF;        // N/rho
 
