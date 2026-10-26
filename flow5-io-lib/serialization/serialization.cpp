@@ -2684,7 +2684,7 @@ bool serial::serializePlanePolarExtFl5v726(PlanePolarExt *pPolar, QDataStream &a
         int nSpares=0;
         ar >> nSpares;
         ar >> nDataPoints;
-        if(abs(n)>10000) return false;
+        if(abs(nDataPoints)>10000) return false;
         pPolar->resizeData(nDataPoints);
 //        for(uint ivar=0; ivar<pPolar->nVariables(); ivar++)            pPolar->m_data[ivar].resize(nDataPoints);
 
@@ -2772,7 +2772,7 @@ bool serial::serializePlanePolarExtFl5v750(PlanePolarExt *pPolar, QDataStream &a
         int nSpares=0;
         ar >> nSpares;
         ar >> nDataPoints;
-        if(abs(n)>10000) return false;
+        if(abs(nDataPoints)>10000) return false;
         pPolar->resizeData(nDataPoints);
 //        for(uint ivar=0; ivar<pPolar->dataSize(); ivar++)            pPolar->m_data[ivar].resize(nDataPoints);
 
@@ -2784,8 +2784,7 @@ bool serial::serializePlanePolarExtFl5v750(PlanePolarExt *pPolar, QDataStream &a
             for(int ipt=0; ipt<nDataPoints; ipt++)
             {
                 ar >> dble;
-                if(ivar<int(pPolar->dataSize()) && (ipt<pPolar->dataSize()))
-                    pPolar->setData(ivar, ipt, dble);
+                pPolar->setData(ivar, ipt, dble);   // setData() bounds both indices
             }
             ivar++;
         }
