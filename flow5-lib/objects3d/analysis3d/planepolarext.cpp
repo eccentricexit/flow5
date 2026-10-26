@@ -50,8 +50,8 @@ void PlanePolarExt::resizeData(int newsize)
 
 double PlanePolarExt::getVariable(int iVariable, int index) const
 {
-    if(iVariable<0 || iVariable>variableCount()) return 0.0;
-    if((index<0) || (index>int(m_data.at(0).size())))  return 0.0;
+    if(iVariable<0 || iVariable>=variableCount()) return 0.0;
+    if(index<0 || index>=int(m_data.at(iVariable).size()))  return 0.0;
     return m_data.at(iVariable).at(index);
 }
 
