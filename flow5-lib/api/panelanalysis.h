@@ -78,6 +78,7 @@ class FL5LIB_EXPORT PanelAnalysis
         bool isFinished()  const {return m_AnalysisStatus==xfl::FINISHED || m_AnalysisStatus==xfl::CANCELLED;}
 
         bool allocateMatrix(int N);
+        void releaseMatrix();
 
         virtual Panel *panel(int p) = 0;
         virtual Panel const *panelAt(int p) const = 0;
@@ -138,7 +139,7 @@ class FL5LIB_EXPORT PanelAnalysis
         void makeRHS(const std::vector<Vector3d> &VField, std::vector<double> &RHS, const Vector3d *normals);
 
         void addWakeContribution();
-        virtual void computeAddedMass();
+        virtual void computeAddedMass(bool bConsumeMatrix=false);
         /** The added-mass tensor over the density of the closed thick surfaces (computeAddedMass()): 36 values, row-major, the generalised coordinates the
          *  translations along x, y, z and the rotations about x, y, z through addedMassReference(), geometry axes; m^3 between translations, m^4 between a
          *  translation and a rotation, m^5 between rotations. Empty where it is not derived: addedMassReason() says why. */

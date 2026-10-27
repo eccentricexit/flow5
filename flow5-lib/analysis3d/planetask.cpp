@@ -3416,7 +3416,8 @@ void PlaneTask::getVelocityVector(Vector3d const &C, double coreradius, bool bMu
  * a foil with no thickness (a flat plate: its surface has no inside), a thick mesh that does not connect or close.
  * Cost: the thick mesh's influence matrix, its unit right-hand sides and one LU factorisation, measured (4 threads): 7.1 s on an elliptic AR 10 wing
  * of 7536 thick triangles against 3.9 s for its whole VLM2 run, 3.9 s against 2.2 s on a swept flying wing, 1.6 s against 1.0 s on a small three-surface
- * plane: more than the lattice's own solve, which is why it can be switched off (setAddedMass()).
+ * plane: more than the lattice's own solve, which is why it can be switched off (setAddedMass()). Memory: the thick mesh's matrix, factorised where
+ * it is (P3Analysis::computeAddedMass(true)), while the run holds none of its own (setLinearSolution()).
  */
 void PlaneTask::makeThicknessFromThickMesh()
 {
@@ -3460,7 +3461,7 @@ void PlaneTask::makeThicknessFromThickMesh()
     pa.makeUnitRHSVectors();
     pa.makeInfluenceMatrix();
     if(pa.m_bMatrixError) {m_pPA->takeAddedMass(nullptr, "numerical error in the thick mesh's influence matrix"); return;}
-    pa.computeAddedMass();
+    pa.computeAddedMass(true);
     m_pPA->takeAddedMass(&pa, "");
 }
 
@@ -3470,6 +3471,29 @@ bool PlaneTask::setLinearSolution()
     std::string strange;
 
     auto start = std::chrono::system_clock::now();
+
+    // the thin sheet's methods: the added masses of the plane's thick mesh, once (makeThicknessFromThickMesh()), before the run's own matrix is made
+    // and with it freed meanwhile, so that the two matrices are never held at once. Measured, peak memory, one alpha, 4 threads: a thin swept flying
+    // wing of 5408 triangles 907 MiB before, 457 MiB after; the same wing with twice the panels each way 4.2 GiB, where it had needed over 7 GiB
+    bool const bThicknessFromThickMesh = s_bAddedMass && !m_bThicknessMade && !m_pPA->pressuresCarryThickness();
+    if(bThicknessFromThickMesh)
+    {
+        traceStdLog("   Making the added masses...");
+        m_pPA->releaseMatrix();
+        makeThicknessFromThickMesh();
+        if(!m_pPA->allocateMatrix(m_pPA->matSize()))
+        {
+            traceStdLog(" the influence matrix could not be allocated again, aborting\n");
+            m_bError = true;
+            return false;
+        }
+        auto end = std::chrono::system_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        start = end;
+        if(m_pPA->thicknessMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->thicknessReason());
+        else                               strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
+        traceStdLog(strange);
+    }
 
     traceStdLog("   Making the unit RHS vectors...");
     m_pPA->makeUnitRHSVectors();
@@ -3501,18 +3525,20 @@ bool PlaneTask::setLinearSolution()
     }
     if (isCancelled()) return true;
 
-    // the added masses: of the closed surfaces of a thick triangle run, from its matrix before the wake is added (P3Analysis::computeAddedMass()); of the
-    // thick mesh of the same plane for the thin sheet's methods, once (makeThicknessFromThickMesh())
-    traceStdLog("   Making the added masses...");
-    if(!s_bAddedMass) m_pPA->takeAddedMass(nullptr, "not requested");
-    else if(m_pPA->pressuresCarryThickness()) m_pPA->computeAddedMass();
-    else if(!m_bThicknessMade) makeThicknessFromThickMesh();
-    end = std::chrono::system_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    start = end;
-    if(m_pPA->thicknessMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->thicknessReason());
-    else                               strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
-    traceStdLog(strange);
+    // the added masses of the closed surfaces of a thick triangle run, from its matrix before the wake is added (P3Analysis::computeAddedMass()); the thin
+    // sheet's methods made theirs above
+    if(!bThicknessFromThickMesh)
+    {
+        traceStdLog("   Making the added masses...");
+        if(!s_bAddedMass) m_pPA->takeAddedMass(nullptr, "not requested");
+        else if(m_pPA->pressuresCarryThickness()) m_pPA->computeAddedMass();
+        end = std::chrono::system_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        start = end;
+        if(m_pPA->thicknessMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->thicknessReason());
+        else                               strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
+        traceStdLog(strange);
+    }
     if (isCancelled()) return true;
 
     if(!m_pPlPolar->isVLM())

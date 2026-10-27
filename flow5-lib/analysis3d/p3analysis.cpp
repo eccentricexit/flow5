@@ -969,8 +969,10 @@ bool P3Analysis::closedSurfaceCheck(std::string &reason) const
  * potential flow), the Neumann formulation (its doublet density is not the surface potential), surfaces that are not closed (closedSurfaceCheck()):
  * the integrals above hold on a closed surface only, and on an open one the Dirichlet condition inside the body is not that of the body's own interior.
  * Cost: one more LU factorisation of the surfaces' matrix and a copy of it (3.4 s against 2.6 s for the analysis' own LU on 7536 triangles, 4 threads).
+ * With bConsumeMatrix, for an analysis made for its added masses only (PlaneTask::makeThicknessFromThickMesh()), the matrix itself is factorised and
+ * there is no copy: the copy is as large as the matrix, n^2 values.
  */
-void P3Analysis::computeAddedMass()
+void P3Analysis::computeAddedMass(bool bConsumeMatrix)
 {
     m_AddedMass.clear();
     m_ThicknessMass.clear();
@@ -998,18 +1000,33 @@ void P3Analysis::computeAddedMass()
     bool const bLin = m_pPolar3d->isTriLinearMethod();
     if(n!=(bLin ? 3*N : N)) {m_AddedMassReason = "unexpected matrix size"; return;}
 
-    // the matrix of the surfaces is stored by rows (row*n+col) and LAPACK reads columns: its transpose, column-major, is the copy
-    std::vector<double> A(size_t(n)*size_t(n));
-    for(int r=0; r<n; r++)
-        for(int c=0; c<n; c++)
-            A[size_t(c)*size_t(n)+size_t(r)] = s_bDoublePrecision ? m_aijd[size_t(r)*size_t(n)+size_t(c)] : double(m_aijf[size_t(r)*size_t(n)+size_t(c)]);
-
     std::vector<double> B(size_t(n)*6);
     std::vector<double> const *rhs[] = {&m_uRHS, &m_vRHS, &m_wRHS, &m_pRHS, &m_qRHS, &m_rRHS};
     for(int j=0; j<6; j++)
         for(int r=0; r<n; r++) B[size_t(j)*size_t(n)+size_t(r)] = rhs[j]->at(r);
 
-    if(!solveDense(A, n, B, 6))
+    bool bSolved = true;
+    if(bConsumeMatrix)
+    {
+        // the matrix factorised where it is, and solved transposed as the analysis' own is (LUfactorize(), backSubRHS())
+        bSolved = LUfactorize();
+        for(int j=0; bSolved && j<6; j++)
+        {
+            std::vector<double> b(B.begin()+std::ptrdiff_t(j)*n, B.begin()+std::ptrdiff_t(j+1)*n);
+            bSolved = backSubRHS(b);
+            std::copy(b.begin(), b.end(), B.begin()+std::ptrdiff_t(j)*n);
+        }
+    }
+    else
+    {
+        // the matrix of the surfaces is stored by rows (row*n+col) and LAPACK reads columns: its transpose, column-major, is the copy
+        std::vector<double> A(size_t(n)*size_t(n));
+        for(int r=0; r<n; r++)
+            for(int c=0; c<n; c++)
+                A[size_t(c)*size_t(n)+size_t(r)] = s_bDoublePrecision ? m_aijd[size_t(r)*size_t(n)+size_t(c)] : double(m_aijf[size_t(r)*size_t(n)+size_t(c)]);
+        bSolved = solveDense(A, n, B, 6);
+    }
+    if(!bSolved)
     {
         m_AddedMassReason = "the matrix of the surfaces without their wake is singular";
         return;

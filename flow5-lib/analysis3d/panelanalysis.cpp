@@ -136,6 +136,14 @@ bool PanelAnalysis::allocateMatrix(int N)
 }
 
 
+/** Frees the influence matrix; allocateMatrix() makes it again. */
+void PanelAnalysis::releaseMatrix()
+{
+    std::vector<double>().swap(m_aijd);
+    std::vector<float>().swap(m_aijf);
+}
+
+
 void PanelAnalysis::traceStdLog(std::string const &str) const
 {
     m_ErrorLog.append(str);
@@ -252,7 +260,7 @@ void PanelAnalysis::takeAddedMass(PanelAnalysis const *pFrom, std::string const 
 
 
 /** No added masses outside the triangle methods' thick surfaces (P3Analysis::computeAddedMass()). */
-void PanelAnalysis::computeAddedMass()
+void PanelAnalysis::computeAddedMass(bool)
 {
     m_AddedMass.clear();
     m_ThicknessMass.clear();
