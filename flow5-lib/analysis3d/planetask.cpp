@@ -722,6 +722,17 @@ bool PlaneTask::T6Loop()
         strange += str + Units::lengthUnitLabel()  + EOLstr;
         traceStdLog(strange);
 
+        // the thickness' impulse of the point (computePlane()), as the other polars' points carry it: on the thin sheet's methods the tensor of the plane's
+        // thick mesh at the point's bank angle, in the geometry axes computePlane() turns the point's loads back into; made at the first point and again
+        // only where the bank changes. A thick control polar's own surfaces would need the tensor of the mesh turned at each point: not derived.
+        if(!s_bAddedMass) m_pPA->takeAddedMass(nullptr, "not requested");
+        else if(m_pPA->pressuresCarryThickness())
+            m_pPA->takeAddedMass(nullptr, "a control polar of thick surfaces: their mesh is turned at each point, and its added masses are not derived on it");
+        else if(!m_bThicknessMade || fabs(m_Phi-m_ThicknessPhi)>ANGLEPRECISION)
+        {
+            if(!makeThinRunThickness(m_Phi)) return false;
+        }
+
         //reset the initial geometry before a new angle is processed
         traceStdLog("\n      Restoring the base mesh\n");
         m_pPlane->restoreMesh();
@@ -3419,9 +3430,10 @@ void PlaneTask::getVelocityVector(Vector3d const &C, double coreradius, bool bMu
  * plane: more than the lattice's own solve, which is why it can be switched off (setAddedMass()). Memory: the thick mesh's matrix, factorised where
  * it is (P3Analysis::computeAddedMass(true)), while the run holds none of its own (setLinearSolution()).
  */
-void PlaneTask::makeThicknessFromThickMesh()
+void PlaneTask::makeThicknessFromThickMesh(double phi)
 {
     m_bThicknessMade = true;
+    m_ThicknessPhi = phi;
     PlaneXfl const *pPlaneXfl = dynamic_cast<PlaneXfl const*>(m_pPlane);
     if(!pPlaneXfl) {m_pPA->takeAddedMass(nullptr, "the plane is not made of wings and sections"); return;}
     for(int iw=0; iw<pPlaneXfl->nWings(); iw++)
@@ -3447,7 +3459,7 @@ void PlaneTask::makeThicknessFromThickMesh()
     std::string out;
     thick.setFlaps(m_pPlPolar, 0.0, out);
     if(!thick.connectTriMesh(true, false, true)) {m_pPA->takeAddedMass(nullptr, "the plane's thick mesh does not connect"); return;}
-    if(fabs(m_pPlPolar->phi())>AOAPRECISION) thick.triMesh().rotate(0, 0, m_pPlPolar->phi());
+    if(fabs(phi)>AOAPRECISION) thick.triMesh().rotate(0, 0, phi);
 
     PlanePolar polar;
     polar.copy(m_pPlPolar);
@@ -3466,6 +3478,29 @@ void PlaneTask::makeThicknessFromThickMesh()
 }
 
 
+/**
+ * The thin sheet's methods: the thickness' tensor of the plane's thick mesh at the bank angle phi (makeThicknessFromThickMesh()), the run's own
+ * matrix freed meanwhile and allocated again after, so that the two are never held at once. False, with m_bError, if the matrix cannot be allocated again.
+ */
+bool PlaneTask::makeThinRunThickness(double phi)
+{
+    auto start = std::chrono::system_clock::now();
+    traceStdLog("   Making the added masses...");
+    m_pPA->releaseMatrix();
+    makeThicknessFromThickMesh(phi);
+    if(!m_pPA->allocateMatrix(m_pPA->matSize()))
+    {
+        traceStdLog(" the influence matrix could not be allocated again, aborting\n");
+        m_bError = true;
+        return false;
+    }
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count();
+    if(m_pPA->thicknessMass().empty()) traceStdLog(std::format("          not derived: {}\n", m_pPA->thicknessReason()));
+    else                               traceStdLog(std::format("          done in {:.3f} s\n", double(duration)/1000.0));
+    return true;
+}
+
+
 bool PlaneTask::setLinearSolution()
 {
     std::string strange;
@@ -3478,21 +3513,8 @@ bool PlaneTask::setLinearSolution()
     bool const bThicknessFromThickMesh = s_bAddedMass && !m_bThicknessMade && !m_pPA->pressuresCarryThickness();
     if(bThicknessFromThickMesh)
     {
-        traceStdLog("   Making the added masses...");
-        m_pPA->releaseMatrix();
-        makeThicknessFromThickMesh();
-        if(!m_pPA->allocateMatrix(m_pPA->matSize()))
-        {
-            traceStdLog(" the influence matrix could not be allocated again, aborting\n");
-            m_bError = true;
-            return false;
-        }
-        auto end = std::chrono::system_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        start = end;
-        if(m_pPA->thicknessMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->thicknessReason());
-        else                               strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
-        traceStdLog(strange);
+        if(!makeThinRunThickness(m_pPlPolar->phi())) return false;
+        start = std::chrono::system_clock::now();
     }
 
     traceStdLog("   Making the unit RHS vectors...");

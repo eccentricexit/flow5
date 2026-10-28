@@ -153,7 +153,9 @@ class FL5LIB_EXPORT PlaneTask : public Task3d
         std::vector<T8Opp> m_T8Opps;
         Vector3d m_PointOmega;              /**< the rotation of the plane (rad/s, geometry axes) of the point computePlane() is making: a type-8 point's rates, zero otherwise */
         bool m_bThicknessMade = false;      /**< true once makeThicknessFromThickMesh() has run for this task */
-        void makeThicknessFromThickMesh();
+        double m_ThicknessPhi = 0.0;        /**< the bank angle the thickness' tensor was made at (makeThicknessFromThickMesh()) */
+        void makeThicknessFromThickMesh(double phi);
+        bool makeThinRunThickness(double phi);
         bool m_bRatePoint = false;          /**< true while a point with body rates or, on thin triangle methods, with sideslip is computed: computePlane() then adds m_dForceRate and m_dMomentRate */
         std::vector<double> m_slipSol;      /**< the doublet solution of a point without rates but with sideslip, with the yawed wake's change (unit speed) */
         Vector3d m_dForceRate;              /**< the change of the far-field force (N/q, body axes) that the sideslip model of the derivatives makes to a rotating point with sideslip */
