@@ -140,6 +140,12 @@ class FL5LIB_EXPORT PanelAnalysis
 
         void addWakeContribution();
         virtual void computeAddedMass(bool bConsumeMatrix=false);
+        /** The added masses of a run's own closed surfaces, in two steps around its wake and its LU factorisation (PlaneTask::setLinearSolution()):
+         *  prepareAddedMass() before the wake is added, wakeAdded() by addWakeContribution(), finishAddedMass() once the matrix with the wake is
+         *  factorised. Here, in one step. */
+        virtual void prepareAddedMass() {computeAddedMass();}
+        virtual void wakeAdded() {}
+        virtual void finishAddedMass() {}
         /** The added-mass tensor over the density of the closed thick surfaces (computeAddedMass()): 36 values, row-major, the generalised coordinates the
          *  translations along x, y, z and the rotations about x, y, z through addedMassReference(), geometry axes; m^3 between translations, m^4 between a
          *  translation and a rotation, m^5 between rotations. Empty where it is not derived: addedMassReason() says why. */
@@ -192,6 +198,7 @@ class FL5LIB_EXPORT PanelAnalysis
         bool LUfactorize();
         virtual void backSubUnitRHS(double *uRHS, double *vRHS, double*wRHS, double *pRHS, double *qRHS, double*rRHS);
         bool backSubRHS(std::vector<double> &RHS);
+        bool backSubRHS(double *B, int nrhs);
         static bool solveDense(std::vector<double> &A, int n, std::vector<double> &B, int nrhs);
 
         /** Adds v to the entry (row, col) of the influence matrix, or, in the matrix-vector mode of yawedWakeProduct(), v times mu[col] to entry row of the product. Rows are never shared between threads. */

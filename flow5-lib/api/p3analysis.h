@@ -85,6 +85,9 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         int makeWakePanels(Vector3d const &WindDirection, bool bVortonWake) override;
         bool hasThickSurfaces() const override;
         void computeAddedMass(bool bConsumeMatrix=false) override;
+        void prepareAddedMass() override;
+        void wakeAdded() override;
+        void finishAddedMass() override;
         bool closedSurfaceCheck(std::string &reason) const;
         template<typename F> void makeThicknessImpulse(std::vector<std::array<double,6>> const &phi, F const &integrate);
         bool wakeRowExcluded(int i3, int k3) const;
@@ -172,6 +175,14 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
         std::vector<double> m_uRHSVertex, m_vRHSVertex, m_wRHSVertex; /** The unit doublet densities at the triangle's nodes. */
         std::vector<double> m_pRHSVertex, m_qRHSVertex, m_rRHSVertex; /** The unit doublet densities at the triangle's nodes. */
+
+    private:
+        bool addedMassApplies();
+        void addedMassFromSolutions(std::vector<double> const &B);
+        std::vector<int> m_AMCols;                  /**< the matrix columns the wake adds to (prepareAddedMass()); empty when no added mass is pending */
+        std::vector<double> m_AMColsU;              /**< those columns of the matrix without the wake, then the wake's part of them: n x m_AMCols.size(), column-major */
+        std::vector<double> m_AMRHS;                /**< the six unit right-hand sides, n x 6, column-major, as they were before the solve */
+        bool m_bAMWakeTaken = false;                /**< m_AMColsU holds the wake's increments (wakeAdded()) */
 
 };
 

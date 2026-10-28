@@ -566,6 +566,29 @@ void PanelAnalysis::backSubUnitRHS(double *uRHS, double *vRHS, double *wRHS, dou
 }
 
 
+/** Solves the factorised system (LUfactorize()) for nrhs right-hand sides at once, B n x nrhs column-major, in place; double precision only. */
+bool PanelAnalysis::backSubRHS(double *B, int nrhs)
+{
+    if(!s_bDoublePrecision) return false;
+    char trans = 'T';
+    lapack_int n = matSize(), lda = n, ldb = n, nr = nrhs, info = 0;
+#ifdef OPENBLAS
+    openblas_set_num_threads(s_MaxThreads);
+    #ifdef LAPACK_FORTRAN_STRLEN_END
+    dgetrs_(&trans, &n, &nr, m_aijd.data(), &lda, m_ipiv.data(), B, &ldb, &info, 1);
+    #else
+    dgetrs_(&trans, &n, &nr, m_aijd.data(), &lda, m_ipiv.data(), B, &ldb, &info);
+    #endif
+#elif defined INTEL_MKL
+    MKL_Set_Num_Threads_Local(s_MaxThreads);
+    dgetrs_(&trans, &n, &nr, m_aijd.data(), &lda, m_ipiv.data(), B, &ldb, &info);
+#elif defined ACCELERATE_NEW_LAPACK
+    dgetrs_(&trans, &n, &nr, m_aijd.data(), &lda, m_ipiv.data(), B, &ldb, &info);
+#endif
+    return info==0;
+}
+
+
 bool PanelAnalysis::backSubRHS(std::vector<double> &RHS)
 {
     int matsize = int(RHS.size());
@@ -696,6 +719,7 @@ void PanelAnalysis::makeRHS(const std::vector<Vector3d> &VField, std::vector<dou
 void PanelAnalysis::addWakeContribution()
 {
     makeWakeContribution();
+    if(!m_bMatrixError) wakeAdded();
 }
 
 

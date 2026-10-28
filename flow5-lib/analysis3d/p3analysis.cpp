@@ -970,35 +970,46 @@ bool P3Analysis::closedSurfaceCheck(std::string &reason) const
  * the integrals above hold on a closed surface only, and on an open one the Dirichlet condition inside the body is not that of the body's own interior.
  * Cost: one more LU factorisation of the surfaces' matrix and a copy of it (3.4 s against 2.6 s for the analysis' own LU on 7536 triangles, 4 threads).
  * With bConsumeMatrix, for an analysis made for its added masses only (PlaneTask::makeThicknessFromThickMesh()), the matrix itself is factorised and
- * there is no copy: the copy is as large as the matrix, n^2 values.
+ * there is no copy: the copy is as large as the matrix, n^2 values. A run's own surfaces take neither (prepareAddedMass(), finishAddedMass()); this
+ * one-step form is theirs in single precision.
  */
-void P3Analysis::computeAddedMass(bool bConsumeMatrix)
+/** Clears the added masses and checks that they can be derived here; false, with the reason in m_AddedMassReason, when not. */
+bool P3Analysis::addedMassApplies()
 {
     m_AddedMass.clear();
     m_ThicknessMass.clear();
     m_ThicknessReason.clear();
     m_AddedMassAsymmetry = 0.0;
     m_AddedMassReason.clear();
-    if(!m_pPolar3d) {m_AddedMassReason = "no analysis"; return;}
+    m_AMCols.clear();
+    m_AMColsU.clear();
+    m_AMRHS.clear();
+    if(!m_pPolar3d) {m_AddedMassReason = "no analysis"; return false;}
     m_AddedMassRef = m_pPolar3d->CoG();
 
     for(Panel3 const &p3 : m_Panel3)
         if(p3.isMidPanel())
         {
             m_AddedMassReason = "the surfaces are thin: a sheet has no thickness, and its lifting model is the whole of its potential flow";
-            return;
+            return false;
         }
     if(m_pPolar3d->bNeumann())
     {
         m_AddedMassReason = "the Neumann formulation's doublet density is not the surface potential";
-        return;
+        return false;
     }
-    if(!closedSurfaceCheck(m_AddedMassReason)) return;
+    if(!closedSurfaceCheck(m_AddedMassReason)) return false;
 
-    int const N = nPanels();
-    int const n = matSize();
     bool const bLin = m_pPolar3d->isTriLinearMethod();
-    if(n!=(bLin ? 3*N : N)) {m_AddedMassReason = "unexpected matrix size"; return;}
+    if(matSize()!=(bLin ? 3*nPanels() : nPanels())) {m_AddedMassReason = "unexpected matrix size"; return false;}
+    return true;
+}
+
+
+void P3Analysis::computeAddedMass(bool bConsumeMatrix)
+{
+    if(!addedMassApplies()) return;
+    int const n = matSize();
 
     std::vector<double> B(size_t(n)*6);
     std::vector<double> const *rhs[] = {&m_uRHS, &m_vRHS, &m_wRHS, &m_pRHS, &m_qRHS, &m_rRHS};
@@ -1031,6 +1042,121 @@ void P3Analysis::computeAddedMass(bool bConsumeMatrix)
         m_AddedMassReason = "the matrix of the surfaces without their wake is singular";
         return;
     }
+    addedMassFromSolutions(B);
+}
+
+
+/**
+ * A run's own added masses without a copy of its matrix. The wake adds to the columns of the trailing panels only (makeWakeMatrixBlock(): a bottom
+ * or thin trailing panel's and its opposite top panel's; TRILINEAR their two trailing nodes' basis functions): the matrix A without the wake is the
+ * matrix with it, A_w, less U E^T, U its k wake-touched columns' increments and E their k unit columns. prepareAddedMass(), before the wake is added,
+ * keeps those k columns of A and the six unit right-hand sides B; finishAddedMass(), once A_w is factorised for the run, solves A X = B by
+ * Woodbury's identity on that factorisation: Y = A_w^-1 B, Z = A_w^-1 U, X = Y + Z (I - E^T Z)^-1 E^T Y. wakeAdded() turns the kept columns into
+ * U. Memory: n x (k+6) values against the copy's n^2; time: k+6 back-substitutions and a k x k solve against a second factorisation. Measured
+ * against the copy, 4 threads, one or two alphas: every derivative, coefficient and eigenvalue the same to the printed figures, the added-mass entries
+ * that are zero different by round-off (at most 6e-19); peak memory and time, a thick TRIUNIFORM swept flying wing 609 MiB 7.9 s -> 392 MiB 6.8 s, the
+ * same wing TRILINEAR (n = 16368) 4265 MiB 96 s -> 2275 MiB 69 s, a rectangular AR 10 wing TRILINEAR 729 MiB 11.7 s -> 425 MiB 9.9 s.
+ * Single precision keeps the copy (computeAddedMass()).
+ */
+void P3Analysis::prepareAddedMass()
+{
+    if(!s_bDoublePrecision) {computeAddedMass(); return;}
+    if(!addedMassApplies()) return;
+    int const n = matSize();
+    bool const bLin = m_pPolar3d->isTriLinearMethod();
+
+    std::vector<char> touched(size_t(n), 0);
+    auto take = [&](int k3)
+    {
+        if(bLin) touched[size_t(3*k3+1)] = touched[size_t(3*k3+2)] = 1;
+        else     touched[size_t(k3)] = 1;
+    };
+    for(int k3=0; k3<nPanels(); k3++)
+    {
+        Panel3 const &p3k = m_Panel3.at(k3);
+        if(!p3k.isTrailing() || !(p3k.isBotPanel() || p3k.isMidPanel())) continue;
+        take(k3);
+        if(p3k.isBotPanel() && p3k.oppositeIndex()>=0) take(p3k.oppositeIndex());
+    }
+    for(int c=0; c<n; c++) if(touched[size_t(c)]) m_AMCols.push_back(c);
+
+    size_t const k = m_AMCols.size();
+    m_AMColsU.resize(size_t(n)*k);
+    for(size_t j=0; j<k; j++)
+        for(int r=0; r<n; r++) m_AMColsU[j*size_t(n)+size_t(r)] = m_aijd[size_t(r)*size_t(n)+size_t(m_AMCols[j])];
+
+    m_AMRHS.resize(size_t(n)*6);
+    std::vector<double> const *rhs[] = {&m_uRHS, &m_vRHS, &m_wRHS, &m_pRHS, &m_qRHS, &m_rRHS};
+    for(int j=0; j<6; j++)
+        for(int r=0; r<n; r++) m_AMRHS[size_t(j)*size_t(n)+size_t(r)] = rhs[j]->at(r);
+    m_AddedMassReason = "pending: finishAddedMass() was not called";
+}
+
+
+/** After the wake is added (addWakeContribution()), before the factorisation: the kept columns become the wake's increments to them. */
+void P3Analysis::wakeAdded()
+{
+    if(m_AMRHS.empty() || m_bAMWakeTaken) return;
+    int const n = matSize();
+    for(size_t j=0; j<m_AMCols.size(); j++)
+        for(int r=0; r<n; r++)
+        {
+            double &u = m_AMColsU[j*size_t(n)+size_t(r)];
+            u = m_aijd[size_t(r)*size_t(n)+size_t(m_AMCols[j])] - u;
+        }
+    m_bAMWakeTaken = true;
+}
+
+
+void P3Analysis::finishAddedMass()
+{
+    if(m_AMRHS.empty()) return;
+    std::vector<double> Y, Z;
+    Y.swap(m_AMRHS);
+    Z.swap(m_AMColsU);
+    std::vector<int> cols;
+    cols.swap(m_AMCols);
+    bool const bTaken = m_bAMWakeTaken;
+    m_bAMWakeTaken = false;
+    if(!bTaken) {m_AddedMassReason = "the wake was not added before the factorisation"; return;}
+
+    int const n = matSize();
+    int const k = int(cols.size());
+    if(!backSubRHS(Y.data(), 6) || (k>0 && !backSubRHS(Z.data(), k)))
+    {
+        m_AddedMassReason = "the matrix of the surfaces with their wake is singular";
+        return;
+    }
+    if(k>0)
+    {
+        // (I - E^T Z) s = E^T Y, then X = Y + Z s
+        std::vector<double> M(size_t(k)*size_t(k)), S(size_t(k)*6);
+        for(int c=0; c<k; c++)
+            for(int r=0; r<k; r++) M[size_t(c)*size_t(k)+size_t(r)] = (r==c ? 1.0 : 0.0) - Z[size_t(c)*size_t(n)+size_t(cols[size_t(r)])];
+        for(int j=0; j<6; j++)
+            for(int r=0; r<k; r++) S[size_t(j)*size_t(k)+size_t(r)] = Y[size_t(j)*size_t(n)+size_t(cols[size_t(r)])];
+        if(!solveDense(M, k, S, 6))
+        {
+            m_AddedMassReason = "the matrix of the surfaces without their wake is singular";
+            return;
+        }
+        for(int j=0; j<6; j++)
+            for(int c=0; c<k; c++)
+            {
+                double const sc = S[size_t(j)*size_t(k)+size_t(c)];
+                double const *z = Z.data() + size_t(c)*size_t(n);
+                double *y = Y.data() + size_t(j)*size_t(n);
+                for(int r=0; r<n; r++) y[r] += z[r]*sc;
+            }
+    }
+    m_AddedMassReason.clear();
+    addedMassFromSolutions(Y);
+}
+void P3Analysis::addedMassFromSolutions(std::vector<double> const &B)
+{
+    int const N = nPanels();
+    int const n = matSize();
+    bool const bLin = m_pPolar3d->isTriLinearMethod();
 
     // the potentials of the six unit motions on the panels
     std::vector<std::array<double,6>> phi(N);

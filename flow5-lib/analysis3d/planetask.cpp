@@ -3525,20 +3525,11 @@ bool PlaneTask::setLinearSolution()
     }
     if (isCancelled()) return true;
 
-    // the added masses of the closed surfaces of a thick triangle run, from its matrix before the wake is added (P3Analysis::computeAddedMass()); the thin
-    // sheet's methods made theirs above
-    if(!bThicknessFromThickMesh)
-    {
-        traceStdLog("   Making the added masses...");
-        if(!s_bAddedMass) m_pPA->takeAddedMass(nullptr, "not requested");
-        else if(m_pPA->pressuresCarryThickness()) m_pPA->computeAddedMass();
-        end = std::chrono::system_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        start = end;
-        if(m_pPA->thicknessMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->thicknessReason());
-        else                               strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
-        traceStdLog(strange);
-    }
+    // the added masses of the closed surfaces of a thick triangle run, of its matrix without the wake: the columns the wake adds to are kept here and
+    // the system is solved on the run's own factorisation, below (P3Analysis::prepareAddedMass()); the thin sheet's methods made theirs above
+    bool const bOwnAddedMass = !bThicknessFromThickMesh && s_bAddedMass && m_pPA->pressuresCarryThickness();
+    if(!bThicknessFromThickMesh && !s_bAddedMass) m_pPA->takeAddedMass(nullptr, "not requested");
+    if(bOwnAddedMass) m_pPA->prepareAddedMass();
     if (isCancelled()) return true;
 
     if(!m_pPlPolar->isVLM())
@@ -3578,6 +3569,18 @@ bool PlaneTask::setLinearSolution()
     strange = std::format("         done in {:.3f} s\n", double(duration)/1000.0);
     traceStdLog(strange);
     if (isCancelled()) return true;
+
+    if(bOwnAddedMass)
+    {
+        traceStdLog("   Making the added masses...");
+        m_pPA->finishAddedMass();
+        end = std::chrono::system_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        start = end;
+        if(m_pPA->thicknessMass().empty()) strange = std::format("          not derived: {}\n", m_pPA->thicknessReason());
+        else                               strange = std::format("          done in {:.3f} s\n", double(duration)/1000.0);
+        traceStdLog(strange);
+    }
 
     traceStdLog("   Back-substituting RHS...");
     m_pPA->backSubUnitRHS(m_pPA->m_uRHS.data(), m_pPA->m_vRHS.data(), m_pPA->m_wRHS.data(), m_pPA->m_pRHS.data(), m_pPA->m_qRHS.data(), m_pPA->m_rRHS.data());
