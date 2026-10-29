@@ -1958,7 +1958,8 @@ PlaneOpp *PlaneTask::createPlaneOpp(double ctrl, double alpha, double beta, doub
                 pPOpp->m_WingOpp[iw].m_dCp    = pPOpp->m_Cp.data()    + pos;
                 pPOpp->m_WingOpp[iw].m_dG     = pPOpp->m_gamma.data() + pos;
                 pPOpp->m_WingOpp[iw].m_dSigma = pPOpp->m_sigma.data() + pos;
-                pos += pWing->nPanel3();
+                if      (m_pPlPolar->isTriangleMethod()) pos += pWing->nPanel3();
+                else if (m_pPlPolar->isQuadMethod())     pos += pWing->nPanel4();
             }
         }
     }
