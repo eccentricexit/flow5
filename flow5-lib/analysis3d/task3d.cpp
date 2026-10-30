@@ -229,7 +229,7 @@ void Task3d::advectVortonRow(std::vector<Vorton> *thisrow, VortonData const &dat
             //RK2
             if(m_pPA)  m_pPA->getVelocityVector(P0, data.m_Mu, data.m_Sigma, VT1, Vortex::coreRadius(), false, false);
             translation.set((data.m_VInf + VT1)*data.m_dt);
-            P1.set(P0 + translation*data.m_dt/2.0);
+            P1.set(P0 + translation/2.0);          // translation is already the step, (VInf+VT1)*dt: its midpoint is half of it
 
             if(m_pPA)  m_pPA->getVelocityVector(P1, data.m_Mu, data.m_Sigma, VT2, Vortex::coreRadius(), false, false);
             translation.set((data.m_VInf+VT2)*data.m_dt);
