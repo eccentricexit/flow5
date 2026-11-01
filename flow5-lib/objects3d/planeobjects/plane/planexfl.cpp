@@ -1686,9 +1686,12 @@ void PlaneXfl::setRangePositions4(PlanePolar const *pWPolar, double t, std::stri
     std::string strange;
     std::string outstring;
 
+    std::vector<std::vector<double>> flapangles(nWings());
+
     for(int iw=0; iw<nWings(); iw++)
     {
         WingXfl const *pWing = wingAt(iw);
+        flapangles[iw].assign(pWing->nSurfaces(), 0.0);
         int iCtrl=0;
 
         CtrlRange range = pWPolar->angleRange(iw,0);
@@ -1742,12 +1745,15 @@ void PlaneXfl::setRangePositions4(PlanePolar const *pWPolar, double t, std::stri
                                 m_QuadMesh.panel(i4).rotate(surf.hingePoint(), surf.hingeVector(), deltaangle);
                             }
                         }
+                        flapangles[iw][jSurf] = deltaangle;
                     }
                 }
                 iCtrl++;
             }
         }
     }
+
+    if(pWPolar->isQuadMethod()) sealQuadFlapEnds(m_QuadMesh.panels(), m_RefQuadMesh.panels(), flapangles);
 
     outstring  +="\n";
 
@@ -2023,6 +2029,120 @@ int PlaneXfl::sealFlapEnds(std::vector<Panel3> const &panel3, std::vector<Node> 
 }
 
 
+/**
+ * Seals the ends of the deflected flaps of a quad mesh (the vortex lattice methods), as sealFlapEnds() seals the triangle methods':
+ * the same junctions, the same mean deflection about the same junction hinge. A quad panel holds its own copy of each of its four
+ * corners, so at a junction between surfaces the right corners (LB, TB) of the left surface's panels and the left corners (LA, TA)
+ * of the right surface's panels are separate copies that coincide in the reference geometry. A flap's quads turned alone part them:
+ * the ring vortices of the flap's end strip and of the neighbour's end strip no longer share their side legs, the two legs carry
+ * the two strips' circulations apart instead of their difference, and the flow leaks through the slot between them. Measured on a
+ * 2.3 m swept flying wing (VLM2, alpha 4), one outboard flap alone at +15 and -15 deg: the lift change had an even part 31 percent of
+ * its odd part, the flap losing lift at both signs; sealed, 1.5 percent (the triangle methods 1.3). Each copy is set to the mean
+ * deflection: its own flap rotation, where its panel turned with a flap, undone about its own hinge, then the junction rotation by
+ * the mean about the junction's hinge (sealFlapEnds() has the hinge's basis); the end panels are warped, their frames, bound
+ * vortices and control points rebuilt from the moved corners.
+ * @param panel4 the panels to move, with the flaps already turned
+ * @param refpanel4 the panels in the reference geometry, in the same order, used to find the coincident corners
+ * @param flapangles the deflection in degrees of each surface of each wing, 0 for the surfaces without a flap
+ * @return the number of corners moved
+ */
+int PlaneXfl::sealQuadFlapEnds(std::vector<Panel4> &panel4, std::vector<Panel4> const &refpanel4, std::vector<std::vector<double>> const &flapangles) const
+{
+    int nMoved = 0;
+    if(refpanel4.size()!=panel4.size()) return 0;
+
+    auto angle = [&flapangles](int iw, int jSurf)
+    {
+        if(iw<0 || iw>=int(flapangles.size())) return 0.0;
+        if(jSurf<0 || jSurf>=int(flapangles.at(iw).size())) return 0.0;
+        return flapangles.at(iw).at(jSurf);
+    };
+
+    std::vector<bool> bReframe(panel4.size(), false);
+    for(int iw=0; iw<nWings(); iw++)
+    {
+        WingXfl const *pWing = wingAt(iw);
+        for(int jSurf=0; jSurf+1<pWing->nSurfaces(); jSurf++)
+        {
+            Surface const &sa = pWing->surfaceAt(jSurf);   // left
+            Surface const &sb = pWing->surfaceAt(jSurf+1); // right
+            if(sa.isClosedRightSide() || sb.isClosedLeftSide()) continue; // a centre gap, not connected
+
+            double ta = sa.hasTEFlap() ? angle(iw, jSurf)   : 0.0;
+            double tb = sb.hasTEFlap() ? angle(iw, jSurf+1) : 0.0;
+            bool bDefA = fabs(ta)>ANGLEPRECISION;
+            bool bDefB = fabs(tb)>ANGLEPRECISION;
+            if(!bDefA && !bDefB) continue;
+
+            Vector3d jPoint, jVector;
+            if(sa.hasTEFlap() && sb.hasTEFlap())
+            {
+                jPoint  = sb.hingePoint();
+                jVector = (sa.hingeVector()+sb.hingeVector()).normalized();
+            }
+            else
+            {
+                Surface const &sf = sa.hasTEFlap() ? sa : sb;
+                jPoint  = sf.hingePoint();
+                jVector = sf.hingeVector();
+            }
+            bool bCollinear = !(sa.hasTEFlap() && sb.hasTEFlap()) || (sa.hingeVector()*sb.hingeVector()).norm()<1.0e-9;
+            if(fabs(ta-tb)<=ANGLEPRECISION && bCollinear) continue; // deflected together about one hinge line: no slot
+
+            double tmean = (ta+tb)/2.0;
+
+            // the corners of the two surfaces' panels that coincide in the reference geometry, and whether either copy turned with a flap
+            std::vector<std::pair<int,int>> corners; // (panel, corner) of each copy
+            std::vector<bool> bJoinsFlap;
+            auto mark = [&corners, &bJoinsFlap](int i4, int k, bool bFlap)
+            {
+                for(unsigned int c=0; c<corners.size(); c++)
+                    if(corners[c].first==i4 && corners[c].second==k) {bJoinsFlap[c] = bJoinsFlap[c] || bFlap; return;}
+                corners.push_back({i4, k});
+                bJoinsFlap.push_back(bFlap);
+            };
+            for(int ia : sa.panel4List())
+            {
+                if(ia<0 || ia>=int(panel4.size())) continue;
+                bool bFlapA = bDefA && sa.hasFlapPanel4(ia);
+                for(int ib : sb.panel4List())
+                {
+                    if(ib<0 || ib>=int(panel4.size())) continue;
+                    bool bFlapB = bDefB && sb.hasFlapPanel4(ib);
+                    for(int ka=0; ka<4; ka++)
+                    {
+                        for(int kb=0; kb<4; kb++)
+                        {
+                            if(!refpanel4.at(ia).vertex(ka).isSame(refpanel4.at(ib).vertex(kb), 0.0001)) continue;
+                            mark(ia, ka, bFlapA || bFlapB);
+                            mark(ib, kb, bFlapA || bFlapB);
+                        }
+                    }
+                }
+            }
+            for(unsigned int c=0; c<corners.size(); c++)
+            {
+                if(!bJoinsFlap[c]) continue; // neither copy moved with a flap
+                int i4 = corners[c].first;
+                bool bOnA = sa.hasPanel4(i4);
+                Surface const &own = bOnA ? sa : sb;
+                double town = bOnA ? ta : tb;
+                Node &n = panel4[i4].m_Node[corners[c].second];
+                bool bOwnFlap = fabs(town)>ANGLEPRECISION && own.hasFlapPanel4(i4);
+                if(!bOwnFlap && fabs(tmean)<=ANGLEPRECISION) continue; // a fixed copy left where it is
+                if(bOwnFlap) n.rotate(own.hingePoint(), own.hingeVector(), -town);
+                if(fabs(tmean)>ANGLEPRECISION) n.rotate(jPoint, jVector, tmean);
+                bReframe[i4] = true;
+                nMoved++;
+            }
+        }
+    }
+    for(unsigned int i4=0; i4<panel4.size(); i4++)
+        if(bReframe[i4]) panel4[i4].setPanelFrame();
+    return nMoved;
+}
+
+
 double PlaneXfl::flapPosition(AngleControl const &avlc, int iWing, int iFlap) const
 {
     for(int iw=0; iw<nWings(); iw++)
@@ -2127,11 +2247,21 @@ void PlaneXfl::setFlaps(PlanePolar const *pPlPolar, double ctrl, std::string &ou
                                 m_QuadMesh.panel(i4).rotate(surf.hingePoint(), surf.hingeVector(), flapangle);
                             }
                         }
+                        flapangles[iw][jSurf] = flapangle;
+                        bRotated = true;
                     }
                 }
                 iFlap++;
             }
         }
+    }
+
+    if(bRotated && pPlPolar->isQuadMethod())
+    {
+        // close the slots at the flap ends as the triangle methods' are closed below
+        int nSealed = sealQuadFlapEnds(m_QuadMesh.panels(), m_RefQuadMesh.panels(), flapangles);
+        if(nSealed>0)
+            outstring += std::format("   Sealing the flap ends: moved {:d} panel corners to the mean deflection of their junction\n", nSealed);
     }
 
     if(bRotated && pPlPolar->isTriangleMethod())

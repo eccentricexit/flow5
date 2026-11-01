@@ -2781,10 +2781,13 @@ void PlaneTask::setControlPositions(PlaneXfl const*pPlaneXfl, PlanePolar const*p
     double gain = 0.0;
 
     int nCtrl = 0;
+    std::vector<Panel4> const refpanel4 = panel4; // the panels before the control's deflection, for the junctions' coincident corners
+    std::vector<std::vector<double>> flapangles(pPlaneXfl->nWings());
 
     for(int iw=0; iw<pPlaneXfl->nWings(); iw++)
     {
         WingXfl const *pWing = pPlaneXfl->wingAt(iw);
+        flapangles[iw].assign(pWing->nSurfaces(), 0.0);
         int iCtrl=0;
         for (int jSurf=0; jSurf<pWing->nSurfaces(); jSurf++)
         {
@@ -2815,12 +2818,15 @@ void PlaneTask::setControlPositions(PlaneXfl const*pPlaneXfl, PlanePolar const*p
                             panel4[i4].rotate(surf.hingePoint(), surf.hingeVector(), deltaangle);
                         }
                     }
+                    flapangles[iw][jSurf] = deltaangle;
                 }
                 iCtrl++;
                 nCtrl++;
             }
         }
     }
+
+    pPlaneXfl->sealQuadFlapEnds(panel4, refpanel4, flapangles);
 
     outstr  +="\n";
     outstring = outstr;
