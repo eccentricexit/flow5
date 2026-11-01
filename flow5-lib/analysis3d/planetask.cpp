@@ -2667,7 +2667,11 @@ void PlaneTask::computeControlDerivatives(double t7ctrl, double alphaeq, double 
 
     double DeltaCtrl = 0.001;
 
-    // the force of the derivatives in the plane of symmetry is the far-field strip force, the side force the one at the trailing wake point
+    // the force of the derivatives is the far-field one: VLM2's side force is its own far-field force (P4Analysis::forces(), rule 2), the triangle
+    // methods' the sum of their far-field strip forces, as in their rate derivatives (PanelAnalysis::computeAngularDerivatives()). Their force at the
+    // trailing wake points, taken before, put a rudder's CYe 6 percent under the slope of points at +-2 deg with the fin on the plane of symmetry,
+    // and swung through infinity with a fin off it whose wake points lie near the wing's wake sheet; the far-field CYe is within 2.3 percent of
+    // that slope, the difference of a slope at zero and a secant over +-2 deg
     m_pPA->setFarField(true);
 
     for(int ie=0; ie<m_pPlPolar->nAVLCtrls(); ie++)
@@ -2749,7 +2753,7 @@ void PlaneTask::computeControlDerivatives(double t7ctrl, double alphaeq, double 
         // which gives the stability derivative for a rotation equal to deltaCtrl x gain
         Vector3d const &ForceFF = m_pPA->farFieldForce();
         SD.Xde[ie] = (ForceFF - m_Force0FF).dot(is) / DeltaCtrl;
-        SD.Yde[ie] = (Force   - m_Force0  ).dot(js) / DeltaCtrl;
+        SD.Yde[ie] = m_pPlPolar->isTriangleMethod() ? (ForceFF - m_Force0FF).dot(js) / DeltaCtrl : (Force - m_Force0).dot(js) / DeltaCtrl;
         SD.Zde[ie] = (ForceFF - m_Force0FF).dot(ks) / DeltaCtrl;
         // VLM2: the moment of the near-field load of the lattice (P4Analysis::forces(), rule 2): its on-body moment crosses the bound
         // vortices with the unperturbed wind, so that a control's yaw, the difference of the induced drag of the two sides, was about 0
