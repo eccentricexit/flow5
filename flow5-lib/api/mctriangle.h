@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include <vector3d.h>
 #include <triangle3d.h>
 
@@ -78,6 +80,6 @@ private:
 	double delta, delta2;
 	double fz, z2;
 
-	static long s_NullCount;
+	static std::atomic<long> s_NullCount; /**< the degenerate triangles met, counted from the matrix blocks' parallel threads */
 };
 

@@ -27,6 +27,8 @@
 #pragma once
 
 
+#include <atomic>
+
 #include <vorton.h>
 #include <vortex.h>
 #include <aeroforces.h>
@@ -254,8 +256,8 @@ class FL5LIB_EXPORT PanelAnalysis
         bool m_bCancel; /** to interrupt the matrix solver only; */
 
         bool m_bSequence;           /**< true if the calculation is should be performed for a range of aoa */
-        bool m_bWarning;     /**< true if one the OpPoints could not be properly interpolated */
-        bool m_bMatrixError;
+        std::atomic<bool> m_bWarning;     /**< true if one the OpPoints could not be properly interpolated; set by the matrix blocks' threads */
+        std::atomic<bool> m_bMatrixError; /**< set by any of the matrix blocks' threads that meets a non-finite influence, read by the others to stop */
         bool m_bSideslipFarField = false;   /**< true while computeTranslationDerivatives() evaluates the sideslip (v) derivatives: the far-field force has its Trefftz plane perpendicular to the free stream, along which the wake leaves */
         bool m_bSideslipVorticity;   /**< true while computeTranslationDerivatives() evaluates the sideslip (v) derivatives: forces() then puts the free-stream Kutta-Joukowski force of the doublet sheet's vorticity, chordwise as well as spanwise, at the vortex lines' own positions in m_MomentFF, instead of lumping it at the strips' quarter-chord points (thick strips: their lifting vorticity on their mean surface); VLM2 adds the free-stream force of its rings' chordwise legs to the near-field load of its bound vortices */
         std::vector<double> *m_pWakeProduct;   /**< if not null, makeWakeMatrixBlock() does not touch the matrix: it adds each wake entry times m_pWakeMu to this vector (see yawedWakeProduct()) */

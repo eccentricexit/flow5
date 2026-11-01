@@ -32,7 +32,7 @@
 #include <panel.h>
 #include <panelprecision.h>
 
-long MCTriangle::s_NullCount=0;
+std::atomic<long> MCTriangle::s_NullCount{0};
 
 MCTriangle::MCTriangle() : Triangle3d()
 {
