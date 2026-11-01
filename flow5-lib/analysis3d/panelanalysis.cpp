@@ -1324,12 +1324,20 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         computeOnBodyCp(VField.at(0), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+0*N, alphaeq, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
         Momentp = m_MomentFF + m_MomentLift;
+        Forcep = m_ForceFF;
         computeOnBodyCp(VField.at(3), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+3*N, alphaeq, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
         Momentm = m_MomentFF + m_MomentLift;
+        Forcem = m_ForceFF;
     }
     // the triangle methods' p and r moments: the far-field strip forces at the quarter-chord points plus the strips' normal load where it acts
-    // (m_MomentLift), the suction left at the quarter-chord points (P3Analysis::forces(), rule 2); the q moment takes the whole chordwise load
+    // (m_MomentLift), the suction left at the quarter-chord points (P3Analysis::forces(), rule 2); the q moment takes the whole chordwise load.
+    // Their side force is the sum of the same far-field strip forces (m_ForceFF), as in the sideslip derivatives: the force and the moments of a rate
+    // are then one load, and Yp and Yr the slopes of the steady rotating points (a type-8 point with rates, whose force is the far field's). The force
+    // at the trailing wake points, taken before, has the velocity at the end of the finite wake instead: with the fin of a conventional plane on the
+    // plane of symmetry its CYr and CYp read 7 and 18 percent off those slopes, and with a fin off the plane of symmetry standing across the wing's wake
+    // plane, its wake points near the wing's wake sheet (a core of 1e-5 m), CYr swung from -0.62 to +0.68 per rad as the fin moved 2 cm across the
+    // wing's panel edge; the far-field CYr there is +0.211 throughout, the rotating points' slope to four digits.
     SD.Yp = (Forcep -Forcem ).dot(js) /rotationrate/2.0;
     SD.Lp = (Momentp-Momentm).dot(is) /rotationrate/2.0;
     SD.Np = (Momentp-Momentm).dot(ks) /rotationrate/2.0;
@@ -1412,9 +1420,11 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         computeOnBodyCp(VField.at(2), m_uVLocal, m_Cp);
         forces(mup, Sigma.data()+2*N, alphaeq, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
         Momentp = m_MomentFF + m_MomentLift;
+        Forcep = m_ForceFF;      // the side force of the far-field strip forces, as Yp's
         computeOnBodyCp(VField.at(5), m_wVLocal, m_Cp);
         forces(mum, Sigma.data()+5*N, alphaeq, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
         Momentm = m_MomentFF + m_MomentLift;
+        Forcem = m_ForceFF;
     }
 
     SD.Yr = (Forcep -Forcem ).dot(js) /rotationrate/2.0;
