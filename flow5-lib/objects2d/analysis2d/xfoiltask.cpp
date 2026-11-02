@@ -221,8 +221,15 @@ bool XFoilTask::solveStripAlpha(double alphadeg, double Re)
 
 
 /** The strip's own Cl in the fixed-alpha mode: the angle is stepped from well below zero lift toward the strip's Cl (boundary layer carried along) until two converged neighbours bracket it,
- *  then closed in on it by false position. True when a converged solution within CLTOL of the strip's Cl is in the XFoil instance. */
-bool XFoilTask::matchCl(double Cl, double Re)
+ *  then closed in on it by false position. Matched when a converged solution within CLTOL of the strip's Cl is in the XFoil instance; NoCrossing when the
+ *  steps never reach the strip's Cl; Unclosed when they pass it and XFoil does not converge at the strip's Cl, `pAboveDeg` then the lowest
+ *  converged angle found past it.
+ *  An angle of the closing that does not converge is tried again from the last converged state of the bracket, at half the step from it, up to
+ *  MATCHCL_HALVINGS times: inside the bracket the lift can jump where a laminar bubble moves, and a step across the jump from a converged neighbour
+ *  converges where the false-position step from the other side did not. NACA 2413 with a 5 deg flap at 0.7 chord, transition forced at 0.7,
+ *  Re 113,209, Cl 1.36499: the steps bracket it between 10.5 deg (Cl 1.3544) and 11 deg (1.3845), the first false-position angle, 10.676 deg, does not
+ *  converge, and the polar's solution is Cd 0.044 near 10.6 deg. */
+XFoilTask::ClMatch XFoilTask::matchCl(double Cl, double Re, double *pAboveDeg)
 {
     double const CLTOL = 2.0e-3;
     double const step = MATCHCL_STEP;
@@ -243,7 +250,7 @@ bool XFoilTask::matchCl(double Cl, double Re)
             continue;
         }
         double c = m_XFoilInstance.cl;
-        if(fabs(c-Cl)<CLTOL) return true;
+        if(fabs(c-Cl)<CLTOL) return ClMatch::Matched;
         if(havePrev && (cPrev-Cl)*(c-Cl)<0.0)
         {
             aLo = aPrev; cLo = cPrev; aHi = a; cHi = c;
@@ -251,21 +258,37 @@ bool XFoilTask::matchCl(double Cl, double Re)
             break;
         }
         havePrev = true; aPrev = a; cPrev = c;
-        if(sgn*(c-Cl)>0.0) return false; // beyond the strip's Cl without a converged neighbour before it
+        if(sgn*(c-Cl)>0.0) // beyond the strip's Cl without a converged neighbour before it
+        {
+            if(pAboveDeg) *pAboveDeg = a;
+            return ClMatch::Unclosed;
+        }
     }
-    if(!bracket) return false;
+    if(!bracket) return ClMatch::NoCrossing;
 
+    std::unique_ptr<XFoil> pBase = std::make_unique<XFoil>(m_XFoilInstance); // the last converged state: at aHi, then the closing's
+    double aBase = aHi;
     for(int it=0; it<16 && !s_bCancel; it++)
     {
         double a = aLo + (Cl-cLo)/(cHi-cLo)*(aHi-aLo);
         if(it%3==2) a = 0.5*(aLo+aHi); // bisect now and then: false position can creep
-        if(!solveStripAlpha(a, Re)) return false;
+        bool bConverged = solveStripAlpha(a, Re);
+        for(int h=0; h<MATCHCL_HALVINGS && !bConverged && !s_bCancel; h++)
+        {
+            m_XFoilInstance = *pBase;
+            a = aBase + 0.5*(a-aBase);
+            bConverged = solveStripAlpha(a, Re);
+        }
+        if(!bConverged) break;
         double c = m_XFoilInstance.cl;
-        if(fabs(c-Cl)<CLTOL) return true;
+        if(fabs(c-Cl)<CLTOL) return ClMatch::Matched;
         if((c-Cl)*(cLo-Cl)>0.0) {aLo = a; cLo = c;}
         else                    {aHi = a; cHi = c;}
+        *pBase = m_XFoilInstance;
+        aBase = a;
     }
-    return false;
+    if(pAboveDeg) *pAboveDeg = aHi;
+    return ClMatch::Unclosed;
 }
 
 
@@ -304,11 +327,22 @@ bool XFoilTask::onRisingBranch(double Re, XFoil &saved)
  *  original lies within one step of it, it is that solution, at a dip of the rising branch (a laminar bubble moving), and is kept as it was.
  *  Further up it is past the stall: the fixed-Cl mode closes on the strip's own Cl from the polar's solution, kept if it stays within one step
  *  of it, else that fixed-alpha solution (its Cl within matchCl's tolerance). When matchCl finds no crossing below the stall, the strip's Cl is
- *  above its section's maximum at its Re and the original is the only solution there: kept. Always true: the original had converged. */
+ *  above its section's maximum at its Re and the original is the only solution there: kept. When the steps cross the strip's Cl and XFoil does
+ *  not converge there, the original is kept if it lies within one step of the lowest converged angle past the strip's Cl (at a dip of the
+ *  rising branch, as above: the section of matchCl()'s example at Cl 0.755 and Re 137,530); further up it is past the stall while the polar has a solution
+ *  below it that is not found: false, the strip unconverged as any strip XFoil cannot solve, rather than the original kept past the stall. */
 bool XFoilTask::resolveOnRisingBranch(double Cl, double Re, XFoil const &original)
 {
     double const a0 = original.alfa*180.0/PI;
-    if(!matchCl(Cl, Re))
+    double aAbove = 0.0;
+    ClMatch const match = matchCl(Cl, Re, &aAbove);
+    if(match==ClMatch::Unclosed)
+    {
+        if(a0>aAbove+MATCHCL_STEP) return false;
+        m_XFoilInstance = original;
+        return true;
+    }
+    if(match==ClMatch::NoCrossing)
     {
         m_XFoilInstance = original;
         return true;
@@ -366,9 +400,9 @@ bool XFoilTask::processCl(int k)
     {
         // the ramps are in the fixed-Cl mode, and can end past the stall as the strip loop can (onRisingBranch())
         std::unique_ptr<XFoil> pSaved = std::make_unique<XFoil>();
-        if(!onRisingBranch(Re, *pSaved)) resolveOnRisingBranch(Cl, Re, *pSaved);
+        if(!onRisingBranch(Re, *pSaved)) bOK = resolveOnRisingBranch(Cl, Re, *pSaved);
     }
-    else bOK = matchCl(Cl, Re);
+    else bOK = matchCl(Cl, Re)==ClMatch::Matched;
 
     // repurposing control variable to contain convergence result
     m_pPolar->m_Control[k] = bOK ? 1.0 : -1.0;
@@ -432,7 +466,7 @@ bool XFoilTask::processClList()
         if(bConverged && !onRisingBranch(m_pPolar->m_Re.at(icl), *pSaved))
         {
             traceStdLog("   ...falling lift: solved again from attached flow\n");
-            resolveOnRisingBranch(Cl, m_pPolar->m_Re.at(icl), *pSaved);
+            bConverged = resolveOnRisingBranch(Cl, m_pPolar->m_Re.at(icl), *pSaved);
         }
         m_pPolar->m_Control[icl] = bConverged ? 1.0 : -1.0;
 

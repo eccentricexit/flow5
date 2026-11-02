@@ -124,11 +124,15 @@ class FL5LIB_EXPORT XFoilTask
 
         bool solveStrip(double Cl, double Re);
         bool solveStripAlpha(double alphadeg, double Re);
-        bool matchCl(double Cl, double Re);
+        /** matchCl()'s outcome: the strip's Cl reached; no crossing of it stepping up from attached flow (it is above the section's maximum
+         *  at its Re); or a crossing on the way up that XFoil does not converge at. */
+        enum class ClMatch {Matched, NoCrossing, Unclosed};
+        ClMatch matchCl(double Cl, double Re, double *pAboveDeg=nullptr);
         bool onRisingBranch(double Re, XFoil &saved);
         bool resolveOnRisingBranch(double Cl, double Re, XFoil const &original);
 
         static constexpr double MATCHCL_STEP = 0.5;   /**< matchCl()'s step of the angle, and onRisingBranch()'s, deg */
+        static constexpr int MATCHCL_HALVINGS = 4;    /**< matchCl()'s retries of an angle it does not converge at, each half the step from its last converged state */
 
 
     private:
