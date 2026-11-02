@@ -1640,12 +1640,15 @@ static double ringOrientation(Panel3 const &p3, Vector3d const &T)
  * sheets is then the free-stream part of the strips' far-field force (Stokes), to rounding; only its distribution differs, hence the moment.
  *
  * Adds the moment about the CoG (N.m) to Moment and sets Force (N), a check. Thin strips only; the Trefftz-plane part stays on the strips.
+ * The panels first to last-1 (all with last<0): one wing's, for its own moment (vorticityMoment()).
  */
-void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment) const
+void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment,
+                                    int first, int last) const
 {
     Force.set(0.0, 0.0, 0.0);
     double G = G4pi * m_pPolar3d->density();
-    for(int i3=0; i3<nPanels(); i3++)
+    int const iEnd = last<0 ? nPanels() : std::min(last, nPanels());
+    for(int i3=std::max(first, 0); i3<iEnd; i3++)
     {
         Panel3 const &p3 = m_Panel3.at(i3);
         if(!p3.isWingPanel() || p3.isFusePanel()) continue;
@@ -1691,6 +1694,62 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
             Force  += dF * (m0 * G);
         }
     }
+}
+
+
+/**
+ * The moment about the CoG (N.m) of the load of thin sheets, as an operating point takes it: the free-stream Kutta-Joukowski force of the sheets' bound
+ * vorticity where that vorticity lies (sheetVorticityLoad()), plus each strip's Trefftz-plane force, its induced drag, at its quarter-chord point. The panels
+ * first to last-1 (one wing's), all with last<0; Mu3 three values a panel (TRIUNIFORM's three equal), VInf the onset at each panel (m/s).
+ *
+ * The vorticity is the doublet solution's own, n x grad(mu) over the triangles and the vortex lines of the jumps of mu along their edges, so the moment is
+ * that of the load the solution carries, as VLM2's is the moment of its bound vortices' load (P4Analysis::boundVortexLoad()). Its force is the free-stream
+ * part of the strips' far-field force (Stokes); with the Trefftz-plane part the moment and the far-field force of the point agree in what they include,
+ * and the point's moment about another reference point differs by the lever of that force. On a planar sheet in symmetric flow the free-stream load's
+ * centre along a strip is x_te - (integral of mu dx)/mu_te exactly, for constant and for linear doublets; the Trefftz-plane part of a strip lies along the
+ * body x axis there and has no pitching lever about a reference point in the sheet's plane. The pressures integrate the same load on the panels, which
+ * under-resolve the leading edge; the leading-edge force, each strip's far-field force less its panel forces at the strip's leading edge, closed the total
+ * but not the moment. On a flat rectangle of aspect ratio 40 (NACA 0012 thin, chord 0.15 m, TANH chordwise, without the thickness' impulse) the
+ * aerodynamic centre of the pressures with that force sat +0.0013, -0.0021, -0.0032 and -0.0035 chord aft of the quarter chord at 13, 26, 52 and 104
+ * chordwise panels on TRILINEAR (+0.0018, +0.0050, +0.0063, +0.0068 on TRIUNIFORM) where the load of the solution sits at -0.0014 at every count on
+ * TRILINEAR and at -0.0071, -0.0035, -0.0021 and -0.0015 on TRIUNIFORM (constant doublets: as 1/n). With this moment the polar's centre is the solution's,
+ * read as the lever of a lift normal to the free stream: the solution's times cos(alpha), 3e-5 chord nearer the quarter chord at most (TRIUNIFORM at 13).
+ */
+Vector3d P3Analysis::vorticityMoment(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, int first, int last) const
+{
+    Vector3d Moment;
+    int const i0 = std::max(first, 0);
+    int const i1 = last<0 ? nPanels() : std::min(last, nPanels());
+
+    // the sense of the rings' circulation, as forces() takes it: that of the first thin strip
+    double G4pi = 0.0;
+    for(int i3=i0; i3<i1 && G4pi==0.0; i3++)
+    {
+        Panel3 const &p3 = m_Panel3.at(i3);
+        if(p3.isMidPanel() && p3.isTrailing()) G4pi = ringOrientation(p3, p3.trailingVortex()) * 4.0*PI;
+    }
+    if(G4pi==0.0) return Moment;
+
+    Vector3d Force;
+    sheetVorticityLoad(Mu3, VInf, CoG, G4pi, Force, Moment, i0, i1);
+
+    // the strips' Trefftz-plane forces, as trefftzDrag() makes them: the plane perpendicular to the body x axis, every strip of every surface inducing
+    Vector3d const wakedir(1.0, 0.0, 0.0);
+    std::vector<TrefftzStrip> strips;
+    makeTrefftzStrips(Mu3, wakedir, strips);
+    for(int i3=i0; i3<i1; i3++)
+    {
+        Panel3 const &p3 = m_Panel3.at(i3);
+        if(!p3.isTrailing() || !p3.isMidPanel()) continue;
+        Vector3d pt = (p3.leftTrailingNode() + p3.rightTrailingNode())/2.0;
+        pt -= wakedir * pt.dot(wakedir);
+        Vector3d wash = trefftzVelocity(pt, wakedir, strips) * 0.5;
+        int idx = p3.index();
+        double gMid = -(Mu3[3*idx+1] + Mu3[3*idx+2])/2.0 *4.0*PI;
+        Vector3d f = wash * p3.trailingVortex() * (gMid * m_pPolar3d->density());   // N
+        Moment += (stripQuarterPoint(p3) - CoG) * f;
+    }
+    return Moment;
 }
 
 
@@ -2060,6 +2119,9 @@ void P3Analysis::meanSheetVorticityLoad(double const *Mu3, std::vector<Vector3d>
 * m_MomentFF applies each strip's far-field force at the strip's quarter-chord point, so it has no chordwise load. m_MomentLocal is the
 * moment about these points of the strips' own chordwise loads: the panel pressures and, on thin surfaces, the leading-edge force. The
 * pitch damping of a wing needs it, since its load moves along the chord in a pitch rate.
+*
+* On thin surfaces the pitching moment of the wings, in Moment and in m_MomentFF + m_MomentLocal, is that of the sheets' own vorticity
+* (vorticityMoment()), which an operating point takes too (PlaneTask::computePlane()); the rolling and yawing moments are as above.
 */
 void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, double beta, Vector3d const &CoG, bool bFuseMi,
                         std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment)
@@ -2082,6 +2144,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     m_MomentFF.set(0.0, 0.0, 0.0);
     m_MomentLocal.set(0.0, 0.0, 0.0);
     m_MomentLift.set(0.0, 0.0, 0.0);
+    Vector3d wingMoment;   // the on-body moment of the wings' panels and of the thin strips' leading-edge force
     viscousDrag = 0.0;
     viscousMoment.set(0.0,0.0,0.0);
 
@@ -2296,6 +2359,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
             PanelForce = p3.normal() * (-Cp) * p3.area() *1/2.*QInf*QInf;      // Newtons/rho
             PanelLeverArm = p3.CoG() - CoG;
             Moment += PanelLeverArm * PanelForce;                     // N.m/rho
+            if(!p3.isFusePanel()) wingMoment += PanelLeverArm * PanelForce;   // N.m/rho
             if(bThickFF) panelForce[i3] = PanelForce;
             if(stripOfPanel[i3]>=0)
             {
@@ -2332,6 +2396,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     Force += WindDirection*frictiondrag;
 */
     Moment *= m_pPolar3d->density();                          // N.m
+    wingMoment *= m_pPolar3d->density();                      // N.m
 
     // The leading-edge suction of every strip, thin or thick, perpendicular to the leading edge (stripSuctionCorrection(), flow5#28), in rotating
     // states only (m_bRotationSuction: the rate derivatives, the steady rotating points). Three rules, each with its basis and its limit:
@@ -2372,7 +2437,19 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
         if(!stripThin[is]) continue;
         Vector3d leforce = stripFF[is] - stripFP[is] * m_pPolar3d->density();   // N
         Moment += (stripLE[is] - CoG) * leforce;   // N.m
+        wingMoment += (stripLE[is] - CoG) * leforce;   // N.m
         m_MomentLocal += (stripLE[is] - stripQP[is]) * leforce;   // N.m
+    }
+
+    // Thin surfaces: the wings' pitching moment is that of the sheets' own vorticity (vorticityMoment()), in Moment and in m_MomentFF + m_MomentLocal,
+    // the moments of the derivatives; the rolling and yawing moments keep the pressures with the leading-edge force. A fuselage keeps its pressures'.
+    // In a rotating state the vorticity's load sees the local onset, and the leading-edge suction's change (rule 1) lies along the span: it adds no
+    // pitching moment.
+    if(!stripThin.empty() && !hasThickSurfaces())
+    {
+        double const dPitch = vorticityMoment(Mu3, VInf, CoG).y - wingMoment.y;   // N.m
+        Moment.y += dPitch;
+        m_MomentLocal.y += dPitch;
     }
 
     // m_MomentLift: each strip's load normal to its chord plane (stripChordNormal()) where it acts, about the quarter-chord point; what lies in
@@ -2912,3 +2989,4 @@ void P3Analysis::stateFarField(std::vector<double> const &sol, std::vector<Vecto
     Moment = m_MomentFF + m_MomentLocal;
     if(pOnBodyMoment) *pOnBodyMoment = dummyMoment;
 }
+
