@@ -1908,13 +1908,15 @@ void Panel3::sourceN4023Velocity(Vector3d const &C, bool bSelf, Vector3d &Vel, d
         }
     }
 
-    if(fabs(PN)<PLANEROUNDING) Vel.z = 0.0;
+    // In the panel's plane the velocity's normal component is the source sheet's jump, undefined on the sheet and 0 off it: the component
+    // along the panel's normal, not the global z, which is that normal only on a horizontal panel (a fin's normal is y).
+    if(fabs(PN)<PLANEROUNDING) Vel -= m_Normal * Vel.dot(m_Normal);
 
     if(bSelf)
     {
         // The normal component of the velocity is discontinuous in the normal's direction.
         // Force the value on the outer surface to be consistent with the external BC
-        Vel.z = m_Normal.z * 2.0 * PI;
+        Vel += m_Normal * (2.0*PI - Vel.dot(m_Normal));
     }
 }
 
