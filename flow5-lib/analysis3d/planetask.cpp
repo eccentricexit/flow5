@@ -1354,6 +1354,8 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
         for(int iw=0; iw<nWings; iw++)
         {
             WingXfl *pWing = pPlaneXfl->wing(iw);
+            bool bSheetMi = false;
+            Vector3d sheetMi;      // N.m/q, a thin wing's moment of its vorticity
 
             //Compute aero forces and span distributions
             if(m_pPlPolar->isQuadMethod())
@@ -1372,11 +1374,18 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
                 pWing->panel3ComputeInviscidForces(m_pP3A->m_Panel3, m_pPlPolar, CoG, alpha, beta, Cp3Vtx, m_PartAF[iw]);
                 pWing->panel3ComputeStrips(m_pP3A->m_Panel3, m_pPlPolar, CoG, alpha, beta, QInf, Cp3Vtx, m_SpanDistFF[iw]);
 
-                // thin surfaces: add the moment of the leading-edge force that the panel pressures miss, as P3Analysis::forces() does
+                // thin surfaces: the moment of the pressures and of the leading-edge force that the panels miss, and in pitch that of the sheet's own
+                // vorticity (P3Analysis::vorticityMoment()), as VLM2's is its lattice's: the moments P3Analysis::forces() gives the derivatives, so that a
+                // point with sideslip or rates differs from the point without by the derivatives times beta and the rates. A steady rotating point's
+                // vorticity sees its local onset (P3Analysis::onset())
                 if(m_pPlPolar->bThinSurfaces())
                 {
                     double const qDyn = 0.5*m_pPlPolar->density()*QInf*QInf;
                     m_PartAF[iw].addMi(pWing->leadingEdgeMoment(m_SpanDistFF[iw], CoG) * (1.0/qDyn));   // N.m/q
+                    std::vector<Vector3d> VInf = m_pP3A->onset();
+                    if(VInf.empty()) VInf.assign(m_pP3A->nPanels(), objects::windDirection(bInGeomAxes ? 0.0 : alpha, beta)*QInf);
+                    sheetMi = m_pP3A->vorticityMoment(mu3, VInf, CoG, pWing->firstPanel3Index(), pWing->firstPanel3Index()+pWing->nPanel3()) * (1.0/qDyn);
+                    bSheetMi = true;
                 }
             }
 
@@ -1390,6 +1399,8 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
                 partforce = m_PartAF.at(iw).Fsum();
                 partmi    = m_PartAF.at(iw).Mi();
             }
+
+            if(bSheetMi) partmi.y = bInGeomAxes ? objects::windToGeomAxes(sheetMi, alpha, beta).y : sheetMi.y;
 
             if(m_pPlPolar->isType6()) partforce.y *= -1.0;
 
