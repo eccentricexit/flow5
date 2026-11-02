@@ -972,10 +972,12 @@ bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, 
     }
 
 
-    // connect the two surfaces;
-    // this is done by setting the right side panels' node indexes to those of the left side panels;
-    // 1 or two vertices are assigned for each right side panel
-    // leaves some nodes of the right surface dangling, but they can be kept unused in the array
+    // connect the two surfaces: each vertex of the right surface's first strip takes the node of the left surface's last strip nearest to
+    // it, when that one lies within 0.1 mm in each coordinate (the junction section's node, made once for each surface); the right panels'
+    // node indexes become the left panels', and some nodes of the right surface stay dangling, unused in the array.
+    // The nearest node, not the first one within 0.1 mm in the loops' order: a chordwise cell can be shorter than that (the first and last
+    // of 64 cosine-spaced panels on a 0.15 m chord are 0.09 mm), and the first match then joined a vertex to its neighbour along the
+    // chord, which left a triangle with two equal vertices and no area on each side of the junction, at the leading and the trailing edge.
     for(int ir=0; ir<sr.NXPanels()*sr.nCellTriangles()*coef; ir++)  // top and bottom * the triangles of a cell
     {
         int nr = sr.m_FirstStripPanelIndex + ir;
@@ -984,52 +986,46 @@ bool WingXfl::connectSurfaceNodesToNext(int iSurf, std::vector<Panel3> &panels, 
 
         Panel3 &pr = panels[nr];
 
-//        if(pr.isFlapPanel() && !bConnectFlaps) continue;
-
-        for(int il=0; il<sl.NXPanels()*sl.nCellTriangles()*coef; il++)  // top and bottom * the triangles of a cell
+        for(int ivr=0; ivr<3; ivr++)
         {
-            int nl = sl.m_LastStripPanelIndex + il;
-            Panel3 &pl = panels[nl];
-//            if(pl.isFlapPanel() && !bConnectFlaps) continue;
+            Node const rightnode = pr.vertexAt(ivr);
+            if(!bConnectFlaps && rightnode.isFlapNode()) continue;
+            // a cell's centre node lies inside its cell, half a strip from the junction: never the same node
+            if(sr.isCellCentreNode(rightnode.index())) continue;
 
-            if(nl<0 || nl>=int(panels.size())) return false; // error
-
-            //connect only same top bot mid positions
-            if(pl.surfacePosition()!=pr.surfacePosition()) continue;
-
-            int nMerged = 0;
-
-            for(int ivr=0; ivr<3; ivr++)
+            int nlBest = -1, ivlBest = -1;
+            double dBest = 0.0;
+            for(int il=0; il<sl.NXPanels()*sl.nCellTriangles()*coef; il++)  // top and bottom * the triangles of a cell
             {
+                int nl = sl.m_LastStripPanelIndex + il;
+                if(nl<0 || nl>=int(panels.size())) return false; // error
+                Panel3 const &pl = panels[nl];
+
+                //connect only same top bot mid positions
+                if(pl.surfacePosition()!=pr.surfacePosition()) continue;
+
                 for(int ivl=0; ivl<3; ivl++)
                 {
-                    Node const &rightnode = pr.vertexAt(ivr);
                     Node const &leftnode  = pl.vertexAt(ivl);
-
-                    if(!bConnectFlaps)
+                    if(!bConnectFlaps && leftnode.isFlapNode()) continue;
+                    if(sl.isCellCentreNode(leftnode.index())) continue;
+                    if(!rightnode.isSame(leftnode, 0.0001)) continue;
+                    double d = rightnode.distanceTo(leftnode);
+                    if(nlBest<0 || d<dBest)
                     {
-                        if(rightnode.isFlapNode() || leftnode.isFlapNode()) continue;
+                        nlBest = nl;
+                        ivlBest = ivl;
+                        dBest = d;
                     }
-                    // a cell's centre node lies inside its cell, half a strip from the junction: never the same node
-                    if(sr.isCellCentreNode(rightnode.index()) || sl.isCellCentreNode(leftnode.index())) continue;
-
-                    if(rightnode.isSame(leftnode, 0.0001))
-                    {
-                        pr.setVertex(ivr, leftnode);// could also only set the index
-                        nMerged++;
-                    }
-                    if(nMerged>=2) break; // prevent further merges if small panels
                 }
-                if(nMerged>=2) break; // prevent further merges if small panels
             }
-
-            if(ir==0 && bThickSurfaces)
-            {
-                m_StripStartNodes[iSurf+2] = pr.vertexAt(2).index();
-            }
-
+            if(nlBest>=0) pr.setVertex(ivr, panels[nlBest].vertexAt(ivlBest));// could also only set the index
         }
 
+        if(ir==0 && bThickSurfaces)
+        {
+            m_StripStartNodes[iSurf+2] = pr.vertexAt(2).index();
+        }
     }
     return true;
 }
