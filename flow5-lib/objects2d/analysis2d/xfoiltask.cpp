@@ -323,7 +323,8 @@ bool XFoilTask::onRisingBranch(double Re, XFoil &saved)
 
 
 /** The strip again, its fixed-Cl solution `original` (put back in the instance by onRisingBranch()) having a falling lift there: the polar's own
- *  solution at the strip's Cl is the first one the angle reaches stepping up from attached flow (`matchCl`, steps of MATCHCL_STEP). When the
+ *  solution at the strip's Cl is the first one the angle reaches stepping from attached flow towards the strip's Cl (`matchCl`, steps of
+ *  MATCHCL_STEP: up for a positive Cl, down for a negative one, and "further" below is along that direction, where that side's stall lies). When the
  *  original lies within one step of it, it is that solution, at a dip of the rising branch (a laminar bubble moving), and is kept as it was.
  *  Further up it is past the stall: the fixed-Cl mode closes on the strip's own Cl from the polar's solution, kept if it stays within one step
  *  of it, else that fixed-alpha solution (its Cl within matchCl's tolerance). When matchCl finds no crossing below the stall, the strip's Cl is
@@ -334,11 +335,12 @@ bool XFoilTask::onRisingBranch(double Re, XFoil &saved)
 bool XFoilTask::resolveOnRisingBranch(double Cl, double Re, XFoil const &original)
 {
     double const a0 = original.alfa*180.0/PI;
+    double const sgn = Cl>=0.0 ? 1.0 : -1.0;    // the direction matchCl() steps the angle in, towards the stall on the strip's side of zero lift
     double aAbove = 0.0;
     ClMatch const match = matchCl(Cl, Re, &aAbove);
     if(match==ClMatch::Unclosed)
     {
-        if(a0>aAbove+MATCHCL_STEP) return false;
+        if(sgn*(a0-aAbove)>MATCHCL_STEP) return false;
         m_XFoilInstance = original;
         return true;
     }
@@ -348,7 +350,7 @@ bool XFoilTask::resolveOnRisingBranch(double Cl, double Re, XFoil const &origina
         return true;
     }
     double const am = m_XFoilInstance.alfa*180.0/PI;
-    if(a0<=am+MATCHCL_STEP)
+    if(sgn*(a0-am)<=MATCHCL_STEP)
     {
         m_XFoilInstance = original;
         return true;
