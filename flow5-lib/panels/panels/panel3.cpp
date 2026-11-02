@@ -1026,8 +1026,8 @@ void Panel3::computeNFIntegrals(Vector3d const &FieldPtGlobal, double *G1, doubl
      // get the projection of the field point on the triangle's plane
      double eta = R.dot(NormalL);
 
-     // method not applicable for in-plane field points; the callers send a point closer than INPLANEPRECISION to the in-plane integrals,
-     // except doubletBasisVelocity(), which sends only a point within the coordinates' rounding (PLANEROUNDING)
+     // method not applicable for in-plane field points; the callers send only a point within the coordinates' rounding (PLANEROUNDING)
+     // to the in-plane integrals
      if(fabs(eta)<PLANEROUNDING)
      {
          return;
@@ -1934,7 +1934,7 @@ void Panel3::sourcePotential(Vector3d const &Pt, bool bSelf, double &phi) const
     double I1[3];
     memset(I1, 0, 3*sizeof(double));
 
-    bool bInPlane = fabs(Ptl.z)<INPLANEPRECISION;
+    bool bInPlane = fabs(Ptl.z)<PLANEROUNDING;
     if(s_bUseNintcheuFata && !bInPlane)
     {
         // use S. Nintcheu Fata's method
@@ -1985,7 +1985,8 @@ void Panel3::sourceVelocity(Vector3d const& Pt, bool bSelf, Vector3d &Velocity) 
     double I3[6];
     memset(I3, 0, 6*sizeof(double));
 
-    bool bInPlane = fabs(Ptl.z)<INPLANEPRECISION;
+    // as doubletBasisPotential(): the in-plane integrals drop the normal velocity z * integral of 1/r^3
+    bool bInPlane = fabs(Ptl.z)<PLANEROUNDING;
     if(s_bUseNintcheuFata && !bInPlane)
     {
         // use S. Nintcheu Fata's method
@@ -2035,7 +2036,11 @@ void Panel3::doubletBasisPotential(Vector3d const &ptGlobal, bool bSelf, double 
         return;
     }
 
-    if(fabs(Ptl.z)<INPLANEPRECISION)
+    // In the plane only to the coordinates' rounding (PLANEROUNDING), as doubletBasisVelocity(): off the plane the doublet's potential is
+    // -z times the integral of 1/r^3, a term of order z/d that the in-plane value 0 drops. At z = 9e-7 m, 1e-5 m outside the short edge of a
+    // 0.14 mm x 115 mm leading-edge cell, the constant doublet's potential is -0.155 (the self term is 2 pi); the off-plane integrals hold it
+    // to 2e-15, measured against an adaptive integration of the kernel.
+    if(fabs(Ptl.z)<PLANEROUNDING)
     {
         // the doublet potential is zero in the panel's plane outside the panel
         phi[0] = phi[1] = phi[2] = 0.0;
