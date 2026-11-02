@@ -1026,9 +1026,10 @@ void Panel3::computeNFIntegrals(Vector3d const &FieldPtGlobal, double *G1, doubl
      // get the projection of the field point on the triangle's plane
      double eta = R.dot(NormalL);
 
-     if(fabs(eta)<INPLANEPRECISION)
+     // method not applicable for in-plane field points; the callers send a point closer than INPLANEPRECISION to the in-plane integrals,
+     // except doubletBasisVelocity(), which sends only a point within the coordinates' rounding (PLANEROUNDING)
+     if(fabs(eta)<PLANEROUNDING)
      {
-         // method not applicable for in-plane field points
          return;
      }
 
@@ -2128,7 +2129,14 @@ void Panel3::doubletBasisVelocity(Vector3d const &ptGlobal, Vector3d *V, bool bU
     double J05[]={0,0,0};
     double Jx5[]={0,0,0}, Jy5[]={0,0,0};
 
-    bool bInPlane = fabs(Ptl.z)<INPLANEPRECISION;
+    // The in-plane integrals (M. Carley's, bInPlane) are the limit z -> 0: they drop the tangential velocity, of order z/d, and a term
+    // of the normal velocity of order (z/d)^2, d the field point's distance to the triangle. A point closer to the plane than
+    // INPLANEPRECISION (1e-6 m) but 1e-5 m from an edge, as the Gauss points of a cambered thin surface's trailing triangle are from
+    // its wake's first triangle at fine chordwise paneling, gets a normal velocity 0.02 to 0.4 % off, and the solution of such a sheet
+    // up to a quarter off in lift slope. The off-plane integrals (S. Nintcheu Fata's) are exact at any z: measured within 5e-13 of an
+    // adaptive integration of the kernel from z = 1e-14 m to 1e-4 m, on a 0.14 mm x 115 mm leading-edge cell and a 2.95 m x 115 mm wake
+    // triangle, 1e-5 m outside an edge. Only a point in the plane to the rounding of the coordinates takes the in-plane integrals.
+    bool bInPlane = fabs(Ptl.z)<PLANEROUNDING;
     if(s_bUseNintcheuFata && !bInPlane)
     {
         // use S. Nintcheu Fata's method
