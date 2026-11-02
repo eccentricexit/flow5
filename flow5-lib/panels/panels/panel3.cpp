@@ -1648,7 +1648,7 @@ void Panel3::doubletN4023Potential(Vector3d const &C, bool bSelf, double &phi, d
         }
         else
         {
-            if(fabs(PN)<INPLANEPRECISION)
+            if(fabs(PN)<PLANEROUNDING)
             {
                 CJKi = 0.0;
             }
@@ -1737,7 +1737,11 @@ void Panel3::sourceN4023Potential(Vector3d const &C, bool , double &phi, double 
             RNUM = SM*PN * (B*PA-A*PB);
             DNOM = PA*PB + PN*PN*A*B*SM*SM;
 
-            if(fabs(PN)<INPLANEPRECISION)
+            // In the plane only to the coordinates' rounding (PLANEROUNDING), as the Nintcheu Fata routines: off the plane by z, 1e-5 m outside
+            // an edge of a 0.14 mm x 115 mm leading-edge cell, the branch below put the point inside, a potential 2 pi z off (6e-6 at z = 9e-7 m
+            // against -1.4e-3), and the velocity's normal part to zero where it is z times the integral of 1/r^3 (0.155 at 9e-7 m); the
+            // general formula holds both to 1e-14 at every z from 1e-9 to 2e-6 m, measured against an adaptive integration of the kernels.
+            if(fabs(PN)<PLANEROUNDING)
             {
                 // side contribution is >0 if the point is on the panel's right side
                 sign = 1.0;
@@ -1870,7 +1874,7 @@ void Panel3::sourceN4023Velocity(Vector3d const &C, bool bSelf, Vector3d &Vel, d
             RNUM = SM*PN * (B*PA-A*PB);
             DNOM = PA*PB + PN*PN*A*B*SM*SM;
 
-            if(fabs(PN)<INPLANEPRECISION)
+            if(fabs(PN)<PLANEROUNDING)
             {
                 // side contribution is >0 if the point is on the panel's right side
                 if(DNOM<0.0)
@@ -1904,7 +1908,7 @@ void Panel3::sourceN4023Velocity(Vector3d const &C, bool bSelf, Vector3d &Vel, d
         }
     }
 
-    if(fabs(PN)<INPLANEPRECISION) Vel.z = 0.0;
+    if(fabs(PN)<PLANEROUNDING) Vel.z = 0.0;
 
     if(bSelf)
     {
