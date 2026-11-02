@@ -30,9 +30,9 @@
 // All panel methods
 #define DISTANCEPRECISION   1.e-6
 #define INPLANEPRECISION    1.e-6
-// A field point lies in a triangle's plane, for the linear doublet's velocity (Panel3::doubletBasisVelocity), when its distance to the
-// plane is at the rounding of the coordinates: a point in the plane of a triangle of a 6 m wing is off it by 0 to 2e-21 m, and the
-// coordinates of an aircraft below 10 m round at 1e-15 m.
+// A field point lies in a triangle's plane, for the doublet's velocity and potential and the source's potential and velocity (Panel3),
+// when its distance to the plane is at the rounding of the coordinates: a point in the plane of a triangle of a 6 m wing is off it by
+// 0 to 2e-21 m, and the coordinates of an aircraft below 10 m round at 1e-15 m.
 #define PLANEROUNDING       1.e-12
 #define MINREFAREA          1.e-10
 #define MINREFDIMENSION     1.0e-6
