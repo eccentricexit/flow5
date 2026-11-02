@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <memory>
 
 
 #include <xfoiltask.h>
@@ -224,7 +225,7 @@ bool XFoilTask::solveStripAlpha(double alphadeg, double Re)
 bool XFoilTask::matchCl(double Cl, double Re)
 {
     double const CLTOL = 2.0e-3;
-    double const step = 0.5;
+    double const step = MATCHCL_STEP;
     double const sgn = Cl>=0.0 ? 1.0 : -1.0;
 
     initializeBL();
@@ -268,6 +269,63 @@ bool XFoilTask::matchCl(double Cl, double Re)
 }
 
 
+/** Whether the fixed-Cl solution the instance has converged on lies where the lift rises with the angle, as on the polar's branch below the
+ *  stall: a step of the angle by MATCHCL_STEP (the resolution matchCl() brackets the polar's solution with) in the fixed-alpha mode, converged,
+ *  must raise the lift; a step that does not converge counts as falling. The fixed-Cl mode has a second solution past the stall, where the
+ *  lift falls back to the same Cl at a higher angle, and a warm start from a neighbouring strip can converge on it without a word: a strip at
+ *  Cl 0.891 and Re 70,000 (NACA 2413 with a 5 deg flap, transition forced at 0.7), started from its neighbour's solution at higher Cl,
+ *  converged at 13 deg with Cd 0.164 where the polar reads 0.027 near 4 deg. One Newton iteration of the step is not enough: from that
+ *  solution its first-order lift response is a rise. The state is put back from `saved` afterwards, so that a strip on the rising branch,
+ *  and every strip solved after it from its state, is solved exactly as without the check. */
+bool XFoilTask::onRisingBranch(double Re, XFoil &saved)
+{
+    double const cl0 = m_XFoilInstance.cl;
+    saved = m_XFoilInstance;
+    m_XFoilInstance.alfa += MATCHCL_STEP*PI/180.0;
+    m_XFoilInstance.lalfa = true;
+    m_XFoilInstance.qinf = 1.0;
+    m_XFoilInstance.reinf1 = Re;
+    m_XFoilInstance.minf1  = 0.0;
+    bool bRising = false;
+    if(m_XFoilInstance.specal())
+    {
+        m_XFoilInstance.lwake = false;
+        m_XFoilInstance.lvconv = false;
+        loop();
+        bRising = m_XFoilInstance.lvconv && m_XFoilInstance.cl>cl0;
+    }
+    m_XFoilInstance = saved;
+    return bRising;
+}
+
+
+/** The strip again, its fixed-Cl solution `original` (put back in the instance by onRisingBranch()) having a falling lift there: the polar's own
+ *  solution at the strip's Cl is the first one the angle reaches stepping up from attached flow (`matchCl`, steps of MATCHCL_STEP). When the
+ *  original lies within one step of it, it is that solution, at a dip of the rising branch (a laminar bubble moving), and is kept as it was.
+ *  Further up it is past the stall: the fixed-Cl mode closes on the strip's own Cl from the polar's solution, kept if it stays within one step
+ *  of it, else that fixed-alpha solution (its Cl within matchCl's tolerance). When matchCl finds no crossing below the stall, the strip's Cl is
+ *  above its section's maximum at its Re and the original is the only solution there: kept. Always true: the original had converged. */
+bool XFoilTask::resolveOnRisingBranch(double Cl, double Re, XFoil const &original)
+{
+    double const a0 = original.alfa*180.0/PI;
+    if(!matchCl(Cl, Re))
+    {
+        m_XFoilInstance = original;
+        return true;
+    }
+    double const am = m_XFoilInstance.alfa*180.0/PI;
+    if(a0<=am+MATCHCL_STEP)
+    {
+        m_XFoilInstance = original;
+        return true;
+    }
+    std::unique_ptr<XFoil> pMatched = std::make_unique<XFoil>(m_XFoilInstance);
+    if(solveStrip(Cl, Re) && fabs(m_XFoilInstance.alfa*180.0/PI-am)<=MATCHCL_STEP) return true;
+    m_XFoilInstance = *pMatched;
+    return true;
+}
+
+
 /** Fallback for 3d OTF calculations at unconverged span stations.
  *  The strip is solved again from a boundary layer that is built up on the way: a Cl ramp from the attached state at zero lift (two step sizes), a Re ramp from higher Re at the
  *  strip's own Cl, then the fixed-alpha mode closed in on the strip's Cl (`matchCl`).
@@ -303,7 +361,14 @@ bool XFoilTask::processCl(int k)
 
     traceStdLog(std::format("   Re={:g}  Cl={:g} fallback\n", Re, Cl));
 
-    bool bOK = clRamp(0.1) || clRamp(0.03) || reRamp() || matchCl(Cl, Re);
+    bool bOK = clRamp(0.1) || clRamp(0.03) || reRamp();
+    if(bOK)
+    {
+        // the ramps are in the fixed-Cl mode, and can end past the stall as the strip loop can (onRisingBranch())
+        std::unique_ptr<XFoil> pSaved = std::make_unique<XFoil>();
+        if(!onRisingBranch(Re, *pSaved)) resolveOnRisingBranch(Cl, Re, *pSaved);
+    }
+    else bOK = matchCl(Cl, Re);
 
     // repurposing control variable to contain convergence result
     m_pPolar->m_Control[k] = bOK ? 1.0 : -1.0;
@@ -329,6 +394,7 @@ bool XFoilTask::processClList()
 
     traceStdLog("   Initializing BL\n");
     initializeBL();
+    std::unique_ptr<XFoil> pSaved = std::make_unique<XFoil>(); // 7 MB: the converged state the branch check puts back
 
     for(unsigned int icl=0; icl<m_pPolar->m_Cl.size(); icl++)
     {
@@ -361,7 +427,13 @@ bool XFoilTask::processClList()
 
 
         // repurposing control variable to contain convergence result; a converged Cd below s_CdError is spurious (no strip has that little profile drag): the fallback takes it
-        bool const bConverged = m_XFoilInstance.lvconv && m_XFoilInstance.cd>=s_CdError;
+        bool bConverged = m_XFoilInstance.lvconv && m_XFoilInstance.cd>=s_CdError;
+        // a solution past the stall is re-solved on the rising branch (onRisingBranch())
+        if(bConverged && !onRisingBranch(m_pPolar->m_Re.at(icl), *pSaved))
+        {
+            traceStdLog("   ...falling lift: solved again from attached flow\n");
+            resolveOnRisingBranch(Cl, m_pPolar->m_Re.at(icl), *pSaved);
+        }
         m_pPolar->m_Control[icl] = bConverged ? 1.0 : -1.0;
 
         if(bConverged)

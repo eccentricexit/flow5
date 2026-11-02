@@ -125,6 +125,10 @@ class FL5LIB_EXPORT XFoilTask
         bool solveStrip(double Cl, double Re);
         bool solveStripAlpha(double alphadeg, double Re);
         bool matchCl(double Cl, double Re);
+        bool onRisingBranch(double Re, XFoil &saved);
+        bool resolveOnRisingBranch(double Cl, double Re, XFoil const &original);
+
+        static constexpr double MATCHCL_STEP = 0.5;   /**< matchCl()'s step of the angle, and onRisingBranch()'s, deg */
 
 
     private:
