@@ -773,7 +773,7 @@ void P3UniAnalysis::makeVortons(double dl, double const *mu3Vertex, int pos3, in
                     int idxU = nextTopTrailingPanelIndex(p3);
                     assert(idxU>=0);
 
-                    gamma = (Mu3[3*idxU+2] - Mu3[3*idxB+2])*4.0*PI;
+                    gamma = (Mu3[3*idxU+m_Panel3.at(idxU).rightTrailingVertex()] - Mu3[3*idxB+p3.rightTrailingVertex()])*4.0*PI;   // at the right trailing node
                 }
 
                 // Willis 2005 III.D p.9

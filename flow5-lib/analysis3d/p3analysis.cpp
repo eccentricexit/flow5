@@ -206,11 +206,12 @@ void P3Analysis::getDebugPotential(Vector3d const &C, bool bSelf, double const *
                     }
                     else if(m_pPolar3d->isTriLinearMethod())
                     {
-                        // whether p3 is on the left or right wing, node 1 is its left trailing node and node 2 is its right trailing node
+                        // the densities at the panel's left and right trailing nodes (Panel3::leftTrailingVertex(): 2 and 1 on a bottom panel)
+                        double muL = Mu[3*i3+p3.leftTrailingVertex()], muR = Mu[3*i3+p3.rightTrailingVertex()];
                         // if p3w is a left  wake panel, node 0 and 2 are left  side and node 1 is right side
-                        if(p3w->isLeftPanel())  phi += ((phiD[0]+phiD[2])*Mu[3*i3+1] +  phiD[1]         *Mu[3*i3+2]) *sign;
+                        if(p3w->isLeftPanel())  phi += ((phiD[0]+phiD[2])*muL +  phiD[1]         *muR) *sign;
                         // if p3w is a right wake panel, node 0 and 1 are right side and node 2 is left side
-                        else                        phi += ( phiD[2]         *Mu[3*i3+1] + (phiD[0]+phiD[1])*Mu[3*i3+2]) *sign;
+                        else                        phi += ( phiD[2]         *muL + (phiD[0]+phiD[1])*muR) *sign;
                     }
                     //is there another wake panel downstream?
                     if(p3w->m_iPD>=0) p3w = m_WakePanel3.data() + p3w->m_iPD;
@@ -313,10 +314,10 @@ void P3Analysis::velocityVectorBlock(int iBlock, Vector3d const &C, Vector3d *VT
 //            int iRow=0;
             Panel3 const *p3w = &m_WakePanel3[p3.iWake()];
 
-            // whether p3 is on the left or right wing, node 1 is its left trailing node and node 2 is its right trailing node
-            //Mu3[3*i3+1] is the doublet density at the wing's panel left trailing node, and Mu3[3*i3+3] at the right trailing node
-            double mu3left  = data.Mu[3*i3+1];
-            double mu3right = data.Mu[3*i3+2];
+            // the doublet densities at the panel's left and right trailing nodes, where the wake column's left and right sides leave:
+            // vertices 1 and 2 on top and mid panels, 2 and 1 on bottom panels (Panel3::leftTrailingVertex())
+            double mu3left  = data.Mu[3*i3+p3.leftTrailingVertex()];
+            double mu3right = data.Mu[3*i3+p3.rightTrailingVertex()];
 
             while(p3w)
             {
@@ -373,13 +374,13 @@ void P3Analysis::getFarFieldVelocity(const Vector3d &C, const std::vector<Panel3
             A.set(p3.leftTrailingNode());
             A.x += fardist;
             VL = vortexInducedVelocity(p3.leftTrailingNode(), A, C, coreradius);
-            VT +=  VL*(+Mu[3*i3+1] * sign);
+            VT +=  VL*(+Mu[3*i3+p3.leftTrailingVertex()] * sign);
 
             B.set(p3.rightTrailingNode());
             B.x += fardist;
             VR = vortexInducedVelocity(p3.rightTrailingNode(), B, C, coreradius);
             // circulations of each seg are oppposite
-            VT +=  VR*(-Mu[3*i3+2] * sign);
+            VT +=  VR*(-Mu[3*i3+p3.rightTrailingVertex()] * sign);
         }
     }
 }
@@ -423,13 +424,14 @@ double P3Analysis::getPotential(Vector3d const &C, double const *mu, double cons
                 // do not use RFF approximation for wake panels
                 getDoubletInfluence(C, *p3w, nullptr, phiBasis, 0.0, false);
 
-                // whether p3 is on the left or right wing, node 1 is its left trailing node and node 2 is its right trailing node
+                // the densities at the panel's left and right trailing nodes (Panel3::leftTrailingVertex(): 2 and 1 on a bottom panel)
+                double muL = mu[3*i3+p3.leftTrailingVertex()], muR = mu[3*i3+p3.rightTrailingVertex()];
                 // if p3w is a left  wake panel, node 0 and 2 are left  side and node 1 is right side
                 if(p3w->isLeftPanel())
-                    phiT += ((phiBasis[0]+phiBasis[2])*mu[3*i3+1] + phiBasis[1] *mu[3*i3+2]) *sign;
+                    phiT += ((phiBasis[0]+phiBasis[2])*muL + phiBasis[1] *muR) *sign;
                 // if p3w is a right wake panel, node 0 and 1 are right side and node 2 is right side
                 else
-                    phiT += ( phiBasis[2]*mu[3*i3+1] + (phiBasis[0]+phiBasis[1])*mu[3*i3+2]) *sign;
+                    phiT += ( phiBasis[2]*muL + (phiBasis[0]+phiBasis[1])*muR) *sign;
 
                 //is there another wake panel downstream?
                 if(p3w->m_iPD>=0) p3w = m_WakePanel3.data() + p3w->m_iPD;
@@ -1430,9 +1432,10 @@ void P3Analysis::inducedForce(int nPanel3, double QInf, double alpha, double bet
                 int idxU = nextTopTrailingPanelIndex(p3);
                 assert(idxU>=0);
 
-                // the trailing nodes have indexes 1 & 2
-                gLeft  = (-mu3[3*idxU+1] + mu3[3*idxB+1])*4.0*PI;
-                gRight = (-mu3[3*idxU+2] + mu3[3*idxB+2])*4.0*PI;
+                // the densities at the strip's left and right trailing nodes (Panel3::leftTrailingVertex())
+                Panel3 const &pU = m_Panel3.at(idxU);
+                gLeft  = (-mu3[3*idxU+pU.leftTrailingVertex()]  + mu3[3*idxB+p3.leftTrailingVertex()]) *4.0*PI;
+                gRight = (-mu3[3*idxU+pU.rightTrailingVertex()] + mu3[3*idxB+p3.rightTrailingVertex()])*4.0*PI;
             }
 
             gMid = (gLeft+gRight)/2.0;
@@ -1588,9 +1591,10 @@ void P3Analysis::trefftzDrag(int nPanel3, double QInf, double alpha, double beta
                 int idxU = nextTopTrailingPanelIndex(p3);
                 assert(idxU>=0);
 
-                // the trailing nodes have indexes 1 & 2
-                gLeft  = (-mu3[3*idxU+1] + mu3[3*idxB+1])*4.0*PI;
-                gRight = (-mu3[3*idxU+2] + mu3[3*idxB+2])*4.0*PI;
+                // the densities at the strip's left and right trailing nodes (Panel3::leftTrailingVertex())
+                Panel3 const &pU = m_Panel3.at(idxU);
+                gLeft  = (-mu3[3*idxU+pU.leftTrailingVertex()]  + mu3[3*idxB+p3.leftTrailingVertex()]) *4.0*PI;
+                gRight = (-mu3[3*idxU+pU.rightTrailingVertex()] + mu3[3*idxB+p3.rightTrailingVertex()])*4.0*PI;
                 gMid = (gLeft+gRight)/2.0;
             }
 
