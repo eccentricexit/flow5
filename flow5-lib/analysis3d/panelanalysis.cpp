@@ -954,7 +954,11 @@ void PanelAnalysis::computeTranslationDerivatives(double alphaeq, double u0, Vec
     if(m_pPolar3d->isQuadMethod())
     {
         mup = m_cRHS.data();
+        // the reference of VLM2's control moments (PlaneTask::computeControlDerivatives()) carries the load of the control states, the free
+        // stream's normal force on the chordwise legs among it (P4Analysis::boundVortexLoad()); nothing else takes Moment0 or m_MomentFF0
+        m_bChordwiseFreeStream = true;
         forces(mup, Sigma.data()+6*N, alpha, beta, CoG, bFuseMi, VField.at(6), Force0, Moment0);
+        m_bChordwiseFreeStream = false;
         m_ForceFF0 = m_ForceFF;
         m_MomentFF0 = m_MomentFF;
     }
@@ -1399,6 +1403,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     // r-derivatives
     if(m_pPolar3d->isQuadMethod())
     {
+        m_bChordwiseFreeStream = true;     // VLM2: the free stream's normal force on the chordwise legs (P4Analysis::boundVortexLoad())
         mup = m_WpRHS.data();
         m_Omega = ks*rotationrate;
         forces(mup, Sigma.data()+2*N, alphaeq, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
@@ -1408,6 +1413,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
         forces(mum, Sigma.data()+5*N, alphaeq, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
         Momentm = m_MomentFF;
         m_Omega.set(0.0, 0.0, 0.0);
+        m_bChordwiseFreeStream = false;
     }
     else if(m_pPolar3d->isTriangleMethod())
     {

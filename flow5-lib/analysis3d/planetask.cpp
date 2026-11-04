@@ -2684,6 +2684,7 @@ void PlaneTask::computeControlDerivatives(double t7ctrl, double alphaeq, double 
     // and swung through infinity with a fin off it whose wake points lie near the wing's wake sheet; the far-field CYe is within 2.3 percent of
     // that slope, the difference of a slope at zero and a secant over +-2 deg
     m_pPA->setFarField(true);
+    m_pPA->m_bChordwiseFreeStream = m_pPlPolar->isVLM2();   // VLM2's moment carries the free stream's normal force on the chordwise legs, as its reference does
 
     for(int ie=0; ie<m_pPlPolar->nAVLCtrls(); ie++)
     {
@@ -2776,6 +2777,7 @@ void PlaneTask::computeControlDerivatives(double t7ctrl, double alphaeq, double 
     }
 
     m_pPA->setFarField(false);
+    m_pPA->m_bChordwiseFreeStream = false;
     m_pPA->restorePanels();
 }
 
