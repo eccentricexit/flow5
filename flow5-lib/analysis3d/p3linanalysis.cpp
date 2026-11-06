@@ -156,7 +156,7 @@ void P3LinAnalysis::makeWakeMatrixBlock(int iBlock)
             {
                 if(m_pWakeProduct && m_RowSkip[i3]) continue;
                 // whether p3k is on the left or right wing,
-                // node 1 is its left trailing node and node 2 is its right trailing node
+                // its left and right trailing nodes are vertices 1 and 2 on a mid panel, 2 and 1 on a bottom panel (Panel3::leftTrailingVertex())
                 // node 0 is the panel3's leading edge and doesn't get any contribution
 
                 // make the wake contributions for the three rows: they are built once and used twice
@@ -195,13 +195,13 @@ void P3LinAnalysis::makeWakeMatrixBlock(int iBlock)
                 else if(p3k.isBotPanel())
                 {
                     double sign = -1.0;
-                    // add wake contribution to bottom panel's contribution
+                    // add wake contribution to bottom panel's contribution: the wake's left side at the panel's left trailing node, its vertex 2
                     for(int ib=0; ib<3; ib++)
                     {
                         int row = 3*i3 + ib;
     //                    col0 = 3*k3;
-                        col1 = 3*k3+1;
-                        col2 = 3*k3+2;
+                        col1 = 3*k3+p3k.leftTrailingVertex();
+                        col2 = 3*k3+p3k.rightTrailingVertex();
                         // add the wake's left contribution to basis function 1, and its right contribution to basis function 2
                         addWakeEntry(row, col1, N, sign * LeftContrib[ib]);
                         addWakeEntry(row, col2, N, sign * RightContrib[ib]);
@@ -209,13 +209,14 @@ void P3LinAnalysis::makeWakeMatrixBlock(int iBlock)
 
                     // add opposite wake contribution to opposite top TE panel's contribution
                     int k3t = p3k.oppositeIndex();
+                    Panel3 const &p3kt = m_Panel3.at(k3t);
                     sign = 1.0;
                     for(int ib=0; ib<3; ib++)
                     {
                         int row = 3*i3 + ib;
     //                    col0 = 3*k3;
-                        col1 = 3*k3t+1;
-                        col2 = 3*k3t+2;
+                        col1 = 3*k3t+p3kt.leftTrailingVertex();
+                        col2 = 3*k3t+p3kt.rightTrailingVertex();
                         // add the wake's left contribution to basis function 1, and its right contribution to basis function 2
                         addWakeEntry(row, col1, N, sign * LeftContrib[ib]);
                         addWakeEntry(row, col2, N, sign * RightContrib[ib]);
@@ -1009,8 +1010,9 @@ void P3LinAnalysis::makeVortons(double dl, double const *mu3Vertex, int pos3, in
                     int idxU = nextTopTrailingPanelIndex(p3);
                     assert(idxU>=0);
 
-                    gLeft  = (Mu3[3*idxU+1] - Mu3[3*idxB+1])*4.0*PI;
-                    gRight = (Mu3[3*idxU+2] - Mu3[3*idxB+2])*4.0*PI;
+                    Panel3 const &pU = m_Panel3.at(idxU);
+                    gLeft  = (Mu3[3*idxU+pU.leftTrailingVertex()]  - Mu3[3*idxB+p3.leftTrailingVertex()]) *4.0*PI;
+                    gRight = (Mu3[3*idxU+pU.rightTrailingVertex()] - Mu3[3*idxB+p3.rightTrailingVertex()])*4.0*PI;
                 }
                 gamma = (gLeft+gRight)/2.0;
 

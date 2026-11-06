@@ -168,6 +168,12 @@ class FL5LIB_EXPORT Panel3 : public Panel
 
         Node const &leftTrailingNode() const override;
         Node const &rightTrailingNode() const override;
+        /** The vertex of a wing's trailing panel at leftTrailingNode() and at rightTrailingNode(), the index of its basis function there: 1 and 2 on
+         *  top and mid panels, 2 and 1 on bottom panels, whose vertices turn the other way (Surface::makeTriPanels()). The wake column leaves
+         *  from the bottom panel's left and right trailing nodes (TriMesh::makeWakePanels()), so the wake's doublet at each of them pairs the
+         *  top and bottom panels' basis functions at that node. */
+        int leftTrailingVertex()  const {return isBotPanel() ? 2 : 1;}
+        int rightTrailingVertex() const {return isBotPanel() ? 1 : 2;}
         inline Vector3d trailingVortex() const override;
         inline Vector3d midTrailingPoint() const override;
         inline Vector3d leadingEdgeMidpoint() const;
