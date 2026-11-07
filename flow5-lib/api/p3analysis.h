@@ -103,7 +103,8 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         void sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment,
                                 int first=0, int last=-1, Vector3d const &Omega=Vector3d()) const;
         Vector3d vorticityMoment(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, int first=0, int last=-1,
-                                 Vector3d const &Omega=Vector3d()) const;
+                                 Vector3d const &Omega=Vector3d(), Vector3d *pForce=nullptr) const;
+        bool rateLoadFromSheet() const;
         bool thickStripChain(int i3, std::vector<int> &chain, int &NX, int &T) const;
         bool thickStripLiftPressureForce(int i3, std::vector<Vector3d> const &panelForce, Vector3d &FP) const;
         bool thickStripLiftMoment(int i3, std::vector<Vector3d> const &panelForce, Vector3d const &QP, Vector3d &M) const;
