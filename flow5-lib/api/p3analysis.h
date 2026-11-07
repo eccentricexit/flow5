@@ -101,8 +101,9 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
         void forces(const double *Mu3, const double *Sigma3, double alpha, double beta, const Vector3d &CoG, bool bFuseMi, std::vector<Vector3d> const &VInf, Vector3d &Force, Vector3d &Moment) override;
         void sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment,
-                                int first=0, int last=-1) const;
-        Vector3d vorticityMoment(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, int first=0, int last=-1) const;
+                                int first=0, int last=-1, Vector3d const &Omega=Vector3d()) const;
+        Vector3d vorticityMoment(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, int first=0, int last=-1,
+                                 Vector3d const &Omega=Vector3d()) const;
         bool thickStripChain(int i3, std::vector<int> &chain, int &NX, int &T) const;
         bool thickStripLiftPressureForce(int i3, std::vector<Vector3d> const &panelForce, Vector3d &FP) const;
         bool thickStripLiftMoment(int i3, std::vector<Vector3d> const &panelForce, Vector3d const &QP, Vector3d &M) const;
@@ -154,10 +155,12 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
         bool makeYawedWakeCorrection(std::vector<double> const &sol0, std::vector<double> &dsol);
         void stateFarField(std::vector<double> const &sol, std::vector<Vector3d> const &field, double alpha, Vector3d const &CoG, bool bFuseMi, bool bSideslipModel,
                            Vector3d &Force, Vector3d &Moment, Vector3d *pOnBodyMoment=nullptr);
-        /** The local onset velocities (m/s) of a steady rotating point, per panel, that inducedForce() applies at the strips; empty for a point without rates. */
-        void setOnset(std::vector<Vector3d> const &field) {m_Onset=field;}
-        void clearOnset() {m_Onset.clear();}
+        /** The local onset velocities (m/s) of a steady rotating point, per panel, that inducedForce() applies at the strips, and its rotation (rad/s, geometry
+         *  axes), with which the sheets' vorticity takes the onset where each line lies (sheetVorticityLoad()); empty and zero for a point without rates. */
+        void setOnset(std::vector<Vector3d> const &field, Vector3d const &Omega) {m_Onset=field; m_OnsetOmega=Omega;}
+        void clearOnset() {m_Onset.clear(); m_OnsetOmega.set(0.0, 0.0, 0.0);}
         std::vector<Vector3d> const &onset() const {return m_Onset;}
+        Vector3d const &onsetOmega() const {return m_OnsetOmega;}
 
         void midWakePoint(const Panel3 *pWakePanel, Vector3d &midleft, Vector3d &midright) const;
         void trailingWakePoint(const Panel3 *pWakePanel, Vector3d &left, Vector3d &right) const;
@@ -167,6 +170,7 @@ class FL5LIB_EXPORT P3Analysis : public PanelAnalysis
 
     protected:
         std::vector<Vector3d> m_Onset;              /**< the velocity of the air relative to each panel's centroid, m/s, of the steady rotating point being solved (setOnset()); empty for a point without rates */
+        Vector3d m_OnsetOmega;                       /**< the rotation (rad/s, geometry axes) of the steady rotating point of m_Onset; zero for a point without rates */
         std::vector<char> m_RowSkip;                /**< the panels left out of the yawed wake's product, set by yawedWakeProduct() */
         std::vector<int> m_Component;               /**< the connected piece (wing) of each panel, set by yawedWakeProduct() */
         double m_WakeClearance = 0.0;               /**< the distance from a wake column within which another wing's panels are left out of the yawed wake's product, set by yawedWakeProduct() */

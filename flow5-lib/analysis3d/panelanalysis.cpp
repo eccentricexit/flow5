@@ -1334,11 +1334,14 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
             mum = m_UmRHS.data();
         }
         computeOnBodyCp(VField.at(0), m_uVLocal, m_Cp);
+        m_Omega = is*rotationrate;      // the sheets' vorticity takes the onset where each line lies (P3Analysis::sheetVorticityLoad())
         forces(mup, Sigma.data()+0*N, alphaeq, beta, CoG, bFuseMi, VField.at(0), Forcep, Momentp);
         Momentp = m_MomentFF + m_MomentLift;
         Forcep = m_ForceFF;
         computeOnBodyCp(VField.at(3), m_wVLocal, m_Cp);
+        m_Omega = is*(-rotationrate);
         forces(mum, Sigma.data()+3*N, alphaeq, beta, CoG, bFuseMi, VField.at(3), Forcem, Momentm);
+        m_Omega.set(0.0, 0.0, 0.0);
         Momentm = m_MomentFF + m_MomentLift;
         Forcem = m_ForceFF;
     }
@@ -1388,11 +1391,14 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
             mum = m_VmRHS.data();
         }
         computeOnBodyCp(VField.at(1), m_uVLocal, m_Cp);
+        m_Omega = js*rotationrate;      // the sheets' vorticity takes the onset where each line lies (P3Analysis::sheetVorticityLoad())
         forces(mup, Sigma.data()+1*N, alphaeq, beta, CoG, bFuseMi, VField.at(1), Forcep, Momentp);
         ForceFFp = m_ForceFF;
         Momentp = m_MomentFF + m_MomentLocal;
         computeOnBodyCp(VField.at(4), m_wVLocal, m_Cp);
+        m_Omega = js*(-rotationrate);
         forces(mum, Sigma.data()+4*N, alphaeq, beta, CoG, bFuseMi, VField.at(4), Forcem, Momentm);
+        m_Omega.set(0.0, 0.0, 0.0);
         ForceFFm = m_ForceFF;
         Momentm = m_MomentFF + m_MomentLocal;
     }
@@ -1432,11 +1438,14 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
             mum = m_WmRHS.data();
         }
         computeOnBodyCp(VField.at(2), m_uVLocal, m_Cp);
+        m_Omega = ks*rotationrate;      // the sheets' vorticity takes the onset where each line lies (P3Analysis::sheetVorticityLoad())
         forces(mup, Sigma.data()+2*N, alphaeq, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
         Momentp = m_MomentFF + m_MomentLift;
         Forcep = m_ForceFF;      // the side force of the far-field strip forces, as Yp's
         computeOnBodyCp(VField.at(5), m_wVLocal, m_Cp);
+        m_Omega = ks*(-rotationrate);
         forces(mum, Sigma.data()+5*N, alphaeq, beta, CoG, bFuseMi, VField.at(5), Forcem, Momentm);
+        m_Omega.set(0.0, 0.0, 0.0);
         Momentm = m_MomentFF + m_MomentLift;
         Forcem = m_ForceFF;
     }
