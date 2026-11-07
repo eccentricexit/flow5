@@ -1,30 +1,22 @@
 # Developing this fork
 
-This fork of flow5 serves a headless use: a potential-flow solver behind a command line that an agent drives to design RC
-aircraft. The GUI stays buildable but is not the product; what matters is that the solver libraries return derived numbers
-or refuse with a reason. Work lands by pull request on this repository; each PR says what it changes, on what basis, and
-what it measured before and after.
+This fork of flow5 serves a headless use: a potential-flow solver behind a command line, driven by an agent that designs RC
+aircraft. The GUI stays buildable but is not the product; what matters is that the solver returns derived numbers or
+refuses with a reason. Work lands by pull request on this repository.
 
-## Rules
+## Principles
 
-- **Derived, never fitted.** A model is the physics with its basis cited where it is used, and a reference checks it, never
-  tunes it. A constant chosen so that a case matches a reference hides the cause. Where no principled form is within reach,
-  the method leaves the number out and says so in its output.
-- **Methods differ.** Hold a method to a derivation or a measurement, not to another method: two methods agreeing proves
-  nothing, and a term kept so that they agree is a fit. Each method's limits are stated at the function that carries them.
-- **A disagreement is a lead, never a verdict.** Two methods that model the same physics agree where neither leaves a term
-  out; where they differ, the difference must be the term one has and the other lacks, in size and in sign. A difference with
-  no such term, or larger than the term explains, or growing with the mesh, is a defect in one of them until shown otherwise:
-  derive what each should give and find which is wrong. A reference code is one more method in this sense.
-- **A known missing term is a task, not a note**, when a result rests on it: leaving a number out and saying so is the honest
-  state of the solver today, never the destination. Put the physics in, with its derivation and its measurement.
-- **Breaking changes are welcome** when they serve the headless use: upstream compatibility, the GUI's conveniences and the
-  `.fl5` export yield to a correct headless result. Say in the PR what breaks.
-- **Every physical model is documented at its function**: what it computes, its basis (the equation, the paper, the AVL
-  routine), its limit with the measurement that sets it. Comments say what the code cannot; never what the code does.
-- **Self-contained.** Everything here (code, comments, commit messages, PR and issue text) is readable on its own: the
-  physics, the measurement and the decision, with no reference to any other repository or its issues. A pointer, where one
-  is needed, is to this repository's own issue or PR.
-- **Keep each file's line endings** (the sources mix CRLF and LF; `git diff --ignore-cr-at-eol` shows a real diff).
-- **Measure before and after.** A PR that moves a number says which, on which fixtures, and why the new value is the
-  derived one.
+- Correct, never matched. A model is the physics. AVL, a wind tunnel, a lattice or another method is an indicator that
+  something may be wrong, never a target, and not assumed right itself. A constant chosen so that a case matches a
+  reference hides the cause; where no principled form is within reach, the number is left out and the output says so.
+- Converge, then agree. A result converges with refinement. Two methods that model the same physics agree where neither
+  leaves a term out; a difference is the term one has and the other lacks, in size and in sign, or a defect to find.
+- A fix is for a wrong number returned without a word, two of the solver's own quantities that disagree where they
+  should not, or a result that does not converge. A change of what the solver models says so.
+- A PR says what it changes and what it measured before and after, on its own: the physics, the measurement, the
+  decision, with no reference to any other repository. A pointer, where one is needed, is to this repository's own PR.
+- Say less. A file says what is true now; the commit message says why it changed. A comment only where the code cannot
+  say it; no histories in files.
+- Breaking changes are welcome when they serve the headless use: upstream compatibility, the GUI's conveniences and the
+  `.fl5` export yield to a correct headless result. Say what breaks.
+- Keep each file's line endings: the sources mix CRLF and LF.
