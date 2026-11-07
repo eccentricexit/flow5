@@ -698,6 +698,40 @@ void P3Analysis::stateSuctionChange(std::vector<double> const &sol, std::vector<
     std::vector<Vector3d> field0(nPanels(), V);
 
     bool bFarField = m_bFarField, bRotation = m_bRotationSuction;
+    if(!hasThickSurfaces())
+    {
+        // thin surfaces: the rotating state's load is the sheet's (rateLoadFromSheet()), as the rate derivatives take it; the point carries the strips'
+        // far-field force and the on-body moment of its own state, so it takes the sheet's change with the rotation less theirs: a point with small rates
+        // differs from the point without by the derivatives times the rates, and tends to it continuously, with or without sideslip
+        Vector3d S[2], SM[2], B[2], BM[2];
+        m_bFarField = true;
+        m_bRotationSuction = false;
+        for(int k=0; k<2; k++)
+        {
+            std::vector<double> const &x = k==0 ? sol : sol0;
+            std::vector<Vector3d> const &f = k==0 ? field : field0;
+            Vector3d const Om = k==0 ? m_OnsetOmega : Vector3d();
+            std::vector<double> none(x.size(), 0.0);
+            std::vector<double> mu3(3*nPanels());
+            if(m_pPolar3d->isTriUniformMethod()) makeVertexDoubletDensities(x, mu3);
+            else                                 std::copy(x.begin(), x.end(), mu3.begin());
+            std::vector<double> sigma(nPanels(), 0.0);
+            makeLocalVelocities(x, none, none, m_uVLocal, m_vVLocal, m_wVLocal, objects::windDirection(alpha, 0.0));
+            computeOnBodyCp(f, m_uVLocal, m_Cp);
+            m_Omega = Om;
+            Vector3d F, M;
+            forces(mu3.data(), sigma.data(), alpha, 0.0, CoG, bFuseMi, f, F, M);
+            B[k] = m_ForceFF;
+            BM[k] = M;
+            SM[k] = vorticityMoment(mu3.data(), f, CoG, 0, -1, Om, &S[k]);
+        }
+        dForce  = (S[0] - S[1]) - (B[0] - B[1]);
+        dMoment = (SM[0] - SM[1]) - (BM[0] - BM[1]);
+        m_Omega.set(0.0, 0.0, 0.0);
+        m_bFarField = bFarField;
+        m_bRotationSuction = bRotation;
+        return;
+    }
     m_bFarField = true;
     for(int k=0; k<2; k++)
     {
@@ -1744,7 +1778,8 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
  * TRILINEAR and at -0.0071, -0.0035, -0.0021 and -0.0015 on TRIUNIFORM (constant doublets: as 1/n). With this moment the polar's centre is the solution's,
  * read as the lever of a lift normal to the free stream: the solution's times cos(alpha), 3e-5 chord nearer the quarter chord at most (TRIUNIFORM at 13).
  */
-Vector3d P3Analysis::vorticityMoment(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, int first, int last, Vector3d const &Omega) const
+Vector3d P3Analysis::vorticityMoment(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, int first, int last, Vector3d const &Omega,
+                                     Vector3d *pForce) const
 {
     Vector3d Moment;
     int const i0 = std::max(first, 0);
@@ -1777,8 +1812,34 @@ Vector3d P3Analysis::vorticityMoment(double const *Mu3, std::vector<Vector3d> co
         double gMid = -(Mu3[3*idx+1] + Mu3[3*idx+2])/2.0 *4.0*PI;
         Vector3d f = wash * p3.trailingVortex() * (gMid * m_pPolar3d->density());   // N
         Moment += (stripQuarterPoint(p3) - CoG) * f;
+        Force += f;
     }
+    if(pForce) *pForce = Force;
     return Moment;
+}
+
+
+/**
+ * True in a rotating state of thin surfaces (the rate derivatives' p, q and r states, a steady rotating point): forces() then takes the far-field force
+ * and the moments of the wings from the sheets' own vorticity at the local onset plus each strip's Trefftz-plane force at its quarter-chord point
+ * (vorticityMoment()), the load whose pitching moment the thin sheets already took.
+ *
+ * Basis: a rotating onset varies along the chord and the span, so where a strip's load sits matters, and the sheet's vorticity is where it is. The
+ * strips' far-field forces, rho Gamma (V + w/2) x l_TE with the onset of the strip's trailing panel at its quarter-chord point, put it elsewhere: in a
+ * pitch rate the trailing panel's onset tilted every strip's force, so that a rectangular wing's drag derivative CXq (aspect ratio 10, alpha 4, CG at
+ * its quarter chord, stability axes) read +0.40 (NACA 0012) and +0.61 (2412) where AVL and VLM2 read -CDq (-0.11, -0.07); and a fin's chordwise
+ * vorticity, whose force in the free stream's spanwise component carries its rolling moment, sat at the quarter-chord points, so that a lone fin's
+ * Clr read 1.67 and 0.74 of AVL's (its trailing legs' force on) at alpha 4 and 8. From the sheet: CXq -0.112 and -0.067, the fin's Clr 0.993 and
+ * 0.998, its Cnr 0.999. The sheet carries the leading-edge suction where it acts, perpendicular to the leading-edge lines, so the strips' suction rule
+ * (stripSuctionCorrection()) and their normal load about the quarter-chord points (m_MomentLift) are not added.
+ * A fuselage keeps its pressures' moment. Limits: thick surfaces keep the strips' far-field forces (their mean-surface load, meanSheetVorticityLoad(),
+ * has no rotating onset). The strips' Trefftz-plane forces at the quarter-chord points carry a wing's induced drag, whose distribution the Trefftz plane
+ * does not give (Munk): a finless wing's Cnr, of which it is most, reads 1.19 to 1.25 of AVL's (the lattices' near-field load) on a swept flying wing
+ * and a low-tail plane, the same term the sideslip derivatives leave out of Cnb.
+ */
+bool P3Analysis::rateLoadFromSheet() const
+{
+    return m_bFarField && m_bRotationSuction && m_Omega.norm()>0.0 && !hasThickSurfaces();
 }
 
 
@@ -2506,6 +2567,28 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                     m_MomentLift += Mlift * m_pPolar3d->density();   // N.m; an irregular chain adds nothing: its load stays at the quarter-chord point
             }
         }
+    }
+
+    // a rotating state of thin surfaces: the far-field force and the moments are the sheets' own load (rateLoadFromSheet())
+    if(rateLoadFromSheet())
+    {
+        Vector3d F;
+        m_MomentFF = vorticityMoment(Mu3, VInf, CoG, 0, -1, m_Omega, &F);
+        m_ForceFF = F;
+        if(bFuseMi)
+        {
+            // a fuselage keeps its pressures' moment, as in the strips' far field above
+            for(int i3=0; i3<nPanels(); i3++)
+            {
+                Panel3 const &p3 = m_Panel3.at(i3);
+                if(!p3.isFusePanel()) continue;
+                double const Q = VInf.at(i3).norm();
+                double const cp = (m_Cp[3*i3]+m_Cp[3*i3+1]+m_Cp[3*i3+2])/3.0;
+                m_MomentFF += (p3.CoG() - CoG) * (p3.normal() * (-cp) * p3.area() * 0.5*Q*Q) * m_pPolar3d->density();   // N.m
+            }
+        }
+        m_MomentLift.set(0.0, 0.0, 0.0);
+        m_MomentLocal.set(0.0, 0.0, 0.0);
     }
 }
 
