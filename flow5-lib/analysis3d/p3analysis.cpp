@@ -602,7 +602,6 @@ Vector3d P3Analysis::stripQuarterPoint(Panel3 const &p3) const
     return ptLE + (ptTE-ptLE)*0.25;
 }
 
-
 /**
  * The frame of a strip's leading-edge suction (flow5#28), from its trailing panel (the mid panel of a thin strip, the bottom one of a thick strip):
  * n the normal of the mean surface at the leading edge (thin: the leading panel's; thick: the difference of the normals of the top and bottom panels
@@ -702,6 +701,7 @@ void P3Analysis::stateSuctionChange(std::vector<double> const &sol, std::vector<
     m_bFarField = true;
     for(int k=0; k<2; k++)
     {
+        m_Omega = k==0 ? m_OnsetOmega : Vector3d();   // the rotating state's (setOnset()); the state of the same free stream without rates has none
         std::vector<double> const &x = k==0 ? sol : sol0;
         std::vector<Vector3d> const &f = k==0 ? field : field0;
         std::vector<double> none(x.size(), 0.0);
@@ -723,6 +723,7 @@ void P3Analysis::stateSuctionChange(std::vector<double> const &sol, std::vector<
         dForce  += (m_ForceFF - FF0) * sign;
         dMoment += Vector3d(dMFF.x, dMFF.y + dML.y, dMFF.z) * sign;
     }
+    m_Omega.set(0.0, 0.0, 0.0);
     m_bFarField = bFarField;
     m_bRotationSuction = bRotation;
 }
@@ -1647,7 +1648,7 @@ static double ringOrientation(Panel3 const &p3, Vector3d const &T)
  * The panels first to last-1 (all with last<0): one wing's, for its own moment (vorticityMoment()).
  */
 void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, double G4pi, Vector3d &Force, Vector3d &Moment,
-                                    int first, int last) const
+                                    int first, int last, Vector3d const &Omega) const
 {
     Force.set(0.0, 0.0, 0.0);
     double G = G4pi * m_pPolar3d->density();
@@ -1692,10 +1693,34 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
             if(p3.isTrailing() && vi[k]+vi[k1]==3) continue;     // vertices 1 and 2 are the trailing nodes
             Vector3d l = x[k1] - x[k];
             double m0 = (mu[k]+mu[k1])/2.0;
-            Vector3d lever = (x[k]-CoG)*m0 + l*((mu[k]+2.0*mu[k1])/6.0);   // integral of mu (x-CoG) along the edge
-            Vector3d dF = V * l;
-            Moment += (lever * dF) * G;
-            Force  += dF * (m0 * G);
+            if(Omega.norm()<=0.0)
+            {
+                Vector3d lever = (x[k]-CoG)*m0 + l*((mu[k]+2.0*mu[k1])/6.0);   // integral of mu (x-CoG) along the edge
+                Vector3d dF = V * l;
+                Moment += (lever * dF) * G;
+                Force  += dF * (m0 * G);
+            }
+            else
+            {
+                // a rotating onset varies along the edge, V + (r - centroid) x Omega: the line takes it where it lies, as the area vorticity takes it at
+                // the centroid, so that the lines a triangle shares with its neighbours cancel where mu is continuous. At the centroid's onset each
+                // side of a shared edge saw its own triangle's, and the residue, rho mu (V_a - V_b) x l summed over the sheet, was an axial force
+                // rho q (integral of mu dA) in a pitch rate: on a rectangular wing (aspect ratio 10, alpha 4) the pitch damping moved 10 percent per
+                // tenth of a chord of height between the sheet and the CoG, against 3 percent in AVL and VLM2. mu and V are linear along the edge:
+                // Simpson's rule is exact for the force (quadratic) and the moment (cubic).
+                Vector3d dF, dM;
+                for(int j=0; j<3; j++)
+                {
+                    double const s = 0.5*j, w = j==1 ? 4.0/6.0 : 1.0/6.0;
+                    Vector3d const r = x[k] + l*s;
+                    double const m = mu[k] + (mu[k1]-mu[k])*s;
+                    Vector3d const f = (V + (r - centroid) * Omega) * l * m;
+                    dF += f * w;
+                    dM += ((r - CoG) * f) * w;
+                }
+                Moment += dM * G;
+                Force  += dF * G;
+            }
         }
     }
 }
@@ -1719,7 +1744,7 @@ void P3Analysis::sheetVorticityLoad(double const *Mu3, std::vector<Vector3d> con
  * TRILINEAR and at -0.0071, -0.0035, -0.0021 and -0.0015 on TRIUNIFORM (constant doublets: as 1/n). With this moment the polar's centre is the solution's,
  * read as the lever of a lift normal to the free stream: the solution's times cos(alpha), 3e-5 chord nearer the quarter chord at most (TRIUNIFORM at 13).
  */
-Vector3d P3Analysis::vorticityMoment(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, int first, int last) const
+Vector3d P3Analysis::vorticityMoment(double const *Mu3, std::vector<Vector3d> const &VInf, Vector3d const &CoG, int first, int last, Vector3d const &Omega) const
 {
     Vector3d Moment;
     int const i0 = std::max(first, 0);
@@ -1735,7 +1760,7 @@ Vector3d P3Analysis::vorticityMoment(double const *Mu3, std::vector<Vector3d> co
     if(G4pi==0.0) return Moment;
 
     Vector3d Force;
-    sheetVorticityLoad(Mu3, VInf, CoG, G4pi, Force, Moment, i0, i1);
+    sheetVorticityLoad(Mu3, VInf, CoG, G4pi, Force, Moment, i0, i1, Omega);
 
     // the strips' Trefftz-plane forces, as trefftzDrag() makes them: the plane perpendicular to the body x axis, every strip of every surface inducing
     Vector3d const wakedir(1.0, 0.0, 0.0);
@@ -2334,7 +2359,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
                 for(auto const &fs : thickFreeStream)
                     if(fs.first==i) m_MomentFF += (stripQuarterPoint(m_Panel3.at(i)) - CoG) * fs.second;   // N.m
         }
-        else sheetVorticityLoad(Mu3, VInf, CoG, stripG.front(), sheetForce, m_MomentFF);
+        else sheetVorticityLoad(Mu3, VInf, CoG, stripG.front(), sheetForce, m_MomentFF, 0, -1, m_Omega);
     }
 
     //On-Body moment
@@ -2451,7 +2476,7 @@ void P3Analysis::forces(double const *Mu3, double const *Sigma3, double alpha, d
     // pitching moment.
     if(!stripThin.empty() && !hasThickSurfaces())
     {
-        double const dPitch = vorticityMoment(Mu3, VInf, CoG).y - wingMoment.y;   // N.m
+        double const dPitch = vorticityMoment(Mu3, VInf, CoG, 0, -1, m_Omega).y - wingMoment.y;   // N.m
         Moment.y += dPitch;
         m_MomentLocal.y += dPitch;
     }

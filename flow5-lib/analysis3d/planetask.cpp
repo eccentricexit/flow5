@@ -1384,7 +1384,8 @@ PlaneOpp* PlaneTask::computePlane(double ctrl, double alpha, double beta, double
                     m_PartAF[iw].addMi(pWing->leadingEdgeMoment(m_SpanDistFF[iw], CoG) * (1.0/qDyn));   // N.m/q
                     std::vector<Vector3d> VInf = m_pP3A->onset();
                     if(VInf.empty()) VInf.assign(m_pP3A->nPanels(), objects::windDirection(bInGeomAxes ? 0.0 : alpha, beta)*QInf);
-                    sheetMi = m_pP3A->vorticityMoment(mu3, VInf, CoG, pWing->firstPanel3Index(), pWing->firstPanel3Index()+pWing->nPanel3()) * (1.0/qDyn);
+                    sheetMi = m_pP3A->vorticityMoment(mu3, VInf, CoG, pWing->firstPanel3Index(), pWing->firstPanel3Index()+pWing->nPanel3(),
+                                                       m_pP3A->onsetOmega()) * (1.0/qDyn);
                     bSheetMi = true;
                 }
             }
@@ -2527,6 +2528,7 @@ bool PlaneTask::solveRatePoint(T8Opp const &t8opp, Vector3d const &CoG, bool bFu
 
     std::vector<Vector3d> field;
     pPA->makeOnsetField(V, Omega, CoG, field);
+    pPA->setOnset(field, Omega);         // the sheets' vorticity takes the onset where each line lies (P3Analysis::sheetVorticityLoad())
 
     // the rotation's part of the strips' leading-edge suction, which the rate derivatives take (P3Analysis::stateSuctionChange(), flow5#28);
     // with sideslip it is made from the solution without the sideslip model's change and added to that change: superposition, exact to first
@@ -2542,7 +2544,6 @@ bool PlaneTask::solveRatePoint(T8Opp const &t8opp, Vector3d const &CoG, bool bFu
     pPA->makeSourceStrengths(field);     // none on thin surfaces
     pPA->setStateDoublets(sol);
     pPA->makeStateCp(sol, field, Q, alpha);
-    pPA->setOnset(field);
 
     computeInducedForces(alpha, beta, Q);
     computeInducedDrag(alpha, beta, Q);
