@@ -1017,9 +1017,8 @@ void P4Analysis::VLMGetVortexInfluence(Panel4 const &p4, Vector3d const &C, doub
 * Where each load is used, with its basis and its limit:
 * 1. The rate derivatives (m_bRotationSuction): the force and the moment are the near-field load. Basis: the onset V + Omega x r is not
 *    uniform, so the far-field force is not the total; the bound vortices' side force is the leading-edge suction perpendicular to the
-*    leading edge of thin-wing theory, the model the triangle methods take in rotation (flow5#28). Limit: AVL's model; the chordwise legs'
-*    force in a rotation, which AVL leaves out, is left out but for the roll rate's onset load and the yaw rate's free-stream normal load
-*    (boundVortexLoad()).
+*    leading edge of thin-wing theory, the model the triangle methods take in rotation (flow5#28). Limit: the chordwise legs take the onset
+*    without the induced velocity in roll and yaw, and no load in pitch (boundVortexLoad()).
 * 2. The control derivatives' moments (PlaneTask::computeControlDerivatives() takes m_MomentFF for VLM2): an aileron's yaw is the
 *    difference of the induced drag of the two wings, which only the near-field load places, and the moment carries the free stream's normal
 *    force on the chordwise legs (boundVortexLoad()), which the far-field force has. Their forces stay the far-field ones: with a
@@ -1245,7 +1244,7 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
  * upstream, whose aft leg lies on the same line; the leading panel's alone) and the force rho Gamma (V + v) x l, with V the onset at the
  * segment's midpoint (VInf of the panel and the rotation m_Omega) and v the velocity the lattice induces there, the segment's own being zero.
  * The chordwise legs and the trailing legs carry no force in the static state (AVL's default, LTRFORCE: on a planar sheet their in-plane load
- * is symmetric and the sheet's in-plane velocity is zero inboard of the tips). They are loaded in two cases:
+ * is symmetric and the sheet's in-plane velocity is zero inboard of the tips). They are loaded in three cases:
  * - the sideslip derivatives (m_bSideslipVorticity): the free-stream force of each ring's chordwise legs on the sheet, up to the trailing edge,
  *   at their midpoints, the vorticity load of the triangle methods, and the velocity at the bound vortices carries the yaw of the trailing legs
  *   with the free stream to first order (yawedWakeVelocityDerivative() times the state's yaw, the linearisation of yawedWakeProduct() that the
@@ -1254,8 +1253,8 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
  *   percent of a wing's own Cnb that converges only logarithmically with the lattice, and on a twisted sheet their induced load is unresolved at
  *   practical counts (the swept twisted flying-wing fixture's Clb read -0.0066 at 13 chordwise panels against -0.0479 at 52, where the
  *   free-stream load reads -0.0478 at every count).
- * - the roll rate (m_bRotationSuction and m_bRollRate, the p derivatives): each chordwise leg takes the onset velocity at its midpoint, the free
- *   stream with the rotation. Its in-plane part is the side-edge (tip) suction of thin-wing theory: on a planar sheet the in-plane load of the chordwise
+ * - the roll and yaw rates (m_bRotationSuction and (m_bRollRate or m_bChordwiseFreeStream)): each chordwise leg takes the onset velocity at its
+ *   midpoint, the free stream with the rotation. Its in-plane part is the side-edge (tip) suction of thin-wing theory: on a planar sheet the in-plane load of the chordwise
  *   vorticity under the onset's normal velocity sums, with the sheet's edges, to zero (Hancock, ARC R&M 3758 Part I, eq 37), so what the interior
  *   carries is the edge force, outboard at the tips, and in a roll the down-going tip's is the larger, which on a swept wing acts behind the CoG.
  *   Without it the yaw due to roll rate is the strip theory's (Toll and Queijo, NACA TN 1581), 0.14 to 0.7 of the rolling-flow measurements on
@@ -1267,21 +1266,15 @@ void P4Analysis::forces(double const *Mu4, double const *Sigma4, double alpha, d
  *   on a swept tip the induced velocity adds a part that is left out here, since it converges only logarithmically with the chordwise count and
  *   is unresolved on a twisted sheet at practical counts (the swept twisted flying-wing fixture's Clp read -0.70 at 13 chordwise panels against
  *   -0.53 at 26 and 52 with it, -0.53 at every count without): near the root, so a quarter of the side force and a few percent of the yaw moment
- *   on a 45 deg wing (an explicit extraction of the edge singularity, Lamar NASA TR R-428, Lan NASA CR-145251, would carry it). In the yaw rate
- *   the same load is not applied, a measured limit and not a derivation: there it reads the yaw damping of the opposite sign to the curved-flow
- *   measurements on swept wings (Cnr at the measured CL +0.012 against -0.080 on the A 1.34, 45 deg wing, where the bound legs alone read -0.083)
- *   and doubles the roll due to yaw on the low-aspect-ratio wings (Clr/CL 0.49 against 0.16 at A 1.34 unswept), while the bound legs alone are
- *   within the measurements' spread on both. The pitch rate is left as the bound legs give it.
- * - the yaw rate and the controls (m_bChordwiseFreeStream: the r derivatives, a control state and its reference): the free stream's force on each
- *   ring's chordwise legs, its component normal to the sheet. Where the free stream runs along a surface's span, as along a fin at an angle of
- *   attack (U sin alpha), that force on the chordwise vorticity is a pressure load the sheet carries: the far-field side force has it (the strips'
+ *   on a 45 deg wing (an explicit extraction of the edge singularity, Lamar NASA TR R-428, Lan NASA CR-145251, would carry it). Attached potential
+ *   flow realises the whole side-edge suction; a real tip at low aspect ratio or high sweep does not, so roll-yaw coupling and yaw damping are upper
+ *   bounds there. The pitch rate is left as the bound legs give it.
+ * - the controls (m_bChordwiseFreeStream without m_bRotationSuction: a control state and its reference): the free stream's force on each ring's
+ *   chordwise legs, its component normal to the sheet. Where the free stream runs along a surface's span, as along a fin at an angle of attack
+ *   (U sin alpha), that force on the chordwise vorticity is a pressure load the sheet carries: the far-field side force has it (the strips'
  *   forces on their trailing edges, by Stokes the whole sheet's vorticity) and the triangle methods' pressures have it, and the bound legs alone
  *   lose it, their force falling as cos(sweep + alpha) on a swept fin. Without it a fin's rudder took its side force from one load (the far field)
- *   and its yawing moment from another, and its yaw-rate side force read the bound legs' alone: on a one-sided fin (aspect ratio 1.2, quarter
- *   chord swept 17.9 deg, trailing edge 6.7 deg forward) CYr 0.968 and 0.936 of the triangle methods' converged value at alpha 4 and 8, the
- *   rudder's Cn/CY 0.982 and 0.965 of theirs. The in-plane part, the onset's normal velocity on the chordwise vorticity, is the side-edge suction
- *   that the yaw rate leaves out (above): with the free stream normal to a planar wing it is all there is, so a wing without dihedral is
- *   unchanged. The rotation's own velocity on the chordwise legs stays out of the yaw rate, as above.
+ *   and its yawing moment from another. The yaw rate instead takes the full onset above, including this normal component.
  * Thin panels only (VLM2); fuse panels are left out.
  * Force (N) and Moment (N.m, about CoG); panelMoment, when given, each panel's share of the moment (N.m, about CoG, zero off the mid-surface).
  */
@@ -1312,38 +1305,28 @@ void P4Analysis::boundVortexLoad(double const *Mu4, double const *Sigma4, std::v
             F[p] = (v * l) * G;
             M[p] = (mid - CoG) * F[p];
 
-            if(m_bSideslipVorticity || (m_bRotationSuction && m_bRollRate))
+            bool const bRateOnset = m_bRotationSuction && (m_bRollRate || m_bChordwiseFreeStream);
+            if(m_bSideslipVorticity || bRateOnset || m_bChordwiseFreeStream)
             {
-                // the ring's two chordwise legs, from its bound vortex to the next one downstream, or to the trailing edge, with the onset velocity
-                // at their midpoints: the free stream in the sideslip derivatives, with the rotation in the roll rate (the tip suction, see above)
+                // the ring's two chordwise legs, from its bound vortex to the next one downstream, or to the trailing edge
                 Vector3d TA, TB;
                 if(p4.isTrailing()) {TA = p4.TA();                  TB = p4.TB();}
                 else                {TA = m_Panel4.at(p-1).m_VA;    TB = m_Panel4.at(p-1).m_VB;}
                 Vector3d midR = (p4.m_VB + TB)*0.5, midL = (p4.m_VA + TA)*0.5;
                 Vector3d vR = VInf.at(p), vL = VInf.at(p);
-                if(m_bRotationSuction && m_bRollRate)
+                if(bRateOnset)
                 {
                     vR += (midR - p4.CoG()) * m_Omega;
                     vL += (midL - p4.CoG()) * m_Omega;
                 }
                 Vector3d fR = (vR * (TB - p4.m_VB)) * Mu4[p];
                 Vector3d fL = (vL * (p4.m_VA - TA)) * Mu4[p];
-                F[p] += fR + fL;
-                M[p] += (midR - CoG) * fR + (midL - CoG) * fL;
-            }
-            else if(m_bChordwiseFreeStream)
-            {
-                // the yaw rate and the controls: the free stream's force on the ring's chordwise legs, its part normal to the sheet (see above)
-                Vector3d TA, TB;
-                if(p4.isTrailing()) {TA = p4.TA();                  TB = p4.TB();}
-                else                {TA = m_Panel4.at(p-1).m_VA;    TB = m_Panel4.at(p-1).m_VB;}
-                Vector3d midR = (p4.m_VB + TB)*0.5, midL = (p4.m_VA + TA)*0.5;
-                Vector3d const &n = p4.normal();
-                Vector3d vFree = VInf.at(p) - (p4.CoG() - CoG) * m_Omega;     // the onset at the panel less the rotation's part
-                Vector3d fR = (vFree * (TB - p4.m_VB)) * Mu4[p];
-                Vector3d fL = (vFree * (p4.m_VA - TA)) * Mu4[p];
-                fR = n * fR.dot(n);
-                fL = n * fL.dot(n);
+                if(m_bChordwiseFreeStream && !bRateOnset)
+                {
+                    Vector3d const &n = p4.normal();
+                    fR = n * fR.dot(n);
+                    fL = n * fL.dot(n);
+                }
                 F[p] += fR + fL;
                 M[p] += (midR - CoG) * fR + (midL - CoG) * fL;
             }
