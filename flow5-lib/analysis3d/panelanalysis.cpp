@@ -1409,7 +1409,7 @@ void PanelAnalysis::computeAngularDerivatives(double alphaeq, double u0, Vector3
     // r-derivatives
     if(m_pPolar3d->isQuadMethod())
     {
-        m_bChordwiseFreeStream = true;     // VLM2: the free stream's normal force on the chordwise legs (P4Analysis::boundVortexLoad())
+        m_bChordwiseFreeStream = true;     // VLM2: the onset force on the chordwise legs (P4Analysis::boundVortexLoad())
         mup = m_WpRHS.data();
         m_Omega = ks*rotationrate;
         forces(mup, Sigma.data()+2*N, alphaeq, beta, CoG, bFuseMi, VField.at(2), Forcep, Momentp);
